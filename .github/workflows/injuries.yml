@@ -1,0 +1,50 @@
+name: Refresh injuries and news
+
+# Runs on GitHub's servers (free), so it works even when your PC is off.
+# It only updates injuries.json on the live site; projections still come from your PC.
+
+on:
+  schedule:
+    # Every 30 minutes from about 9am to midnight Pacific, covering injury reports and tip-offs.
+    - cron: "5,35 17-23 * * *"
+    - cron: "5,35 0-7 * * *"
+  workflow_dispatch:   # lets you run it by hand from the Actions tab to test it
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-injuries
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Fetch injuries and news
+        run: python fetch_injuries.py --out "$RUNNER_TEMP/injuries.json"
+
+      - name: Publish to the live site
+        run: |
+          set -e
+          git fetch origin gh-pages
+          old=$(git rev-parse origin/gh-pages)
+          git checkout --detach origin/gh-pages
+          cp "$RUNNER_TEMP/injuries.json" injuries.json
+          git add injuries.json
+          if git diff --cached --quiet; then
+            echo "No change."
+            exit 0
+          fi
+          git -c user.name="nba-picks bot" -c user.email="actions@users.noreply.github.com" \
+            commit --amend -q -m "Refresh injuries $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push --force-with-lease=gh-pages:$old origin HEAD:gh-pages

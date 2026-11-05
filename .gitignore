@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+nba.db
+archive/
+logs/
+site/slate.json
+site/injuries.json
+backtest_rows.csv
+results.csv
