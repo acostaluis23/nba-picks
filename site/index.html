@@ -13,7 +13,7 @@
 <body>
 
 <nav class="nav wrap" id="nav" aria-label="Pages" hidden>
-  <a href="#/" id="navTonight">Tonight</a>
+  <a href="#/" id="navTonight">Games</a>
   <a href="#/last" id="navLast">Last night</a>
 </nav>
 
@@ -21,10 +21,17 @@
   <div class="top">
     <div class="title-row">
       <div>
-        <h1 class="title">Tonight</h1>
+        <h1 class="title" id="dayTitle">Tonight</h1>
         <p class="sub" id="subline">Loading...</p>
       </div>
     </div>
+
+    <div class="daynav" id="dayNav" hidden>
+      <button type="button" class="daybtn" id="dayPrev" aria-label="Previous day">&#8249;</button>
+      <select id="daySelect" aria-label="Pick a day"></select>
+      <button type="button" class="daybtn" id="dayNext" aria-label="Next day">&#8250;</button>
+    </div>
+    <p class="warn previewnote" id="previewNote" hidden></p>
 
     <div class="toggle-card">
       <div>
@@ -47,7 +54,7 @@
   <div class="grid" id="cards"></div>
   <div id="listMsg"></div>
 
-  <p class="note footer">Projections are estimates from box-score history, not betting advice. Availability is not checked yet, so confirm who is playing before trusting a number.</p>
+  <p class="note footer">Projections are estimates from box-score history, not betting advice. Injury status comes from ESPN and can change before tip-off, so confirm who is playing.</p>
 </main>
 
 <main id="detailView" class="narrow" hidden></main>

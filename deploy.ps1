@@ -24,6 +24,14 @@ if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
 New-Item -ItemType Directory -Path $tmp | Out-Null
 Copy-Item (Join-Path $site "*") $tmp -Recurse
 
+# Stamp the page's script and stylesheet links with the time, so phones fetch the new code
+# instead of showing a cached copy. (Only the temporary copy is changed, not your site\ folder.)
+$stamp = Get-Date -Format "yyyyMMddHHmmss"
+$idx = Join-Path $tmp "index.html"
+$html = [System.IO.File]::ReadAllText($idx)
+$html = $html.Replace('href="style.css"', "href=`"style.css?v=$stamp`"").Replace('src="app.js"', "src=`"app.js?v=$stamp`"")
+[System.IO.File]::WriteAllText($idx, $html)
+
 Push-Location $tmp
 $ok = $true
 git init -q -b gh-pages

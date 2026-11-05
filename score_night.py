@@ -16,6 +16,7 @@ It prints accuracy, who surprised, whether the injury list was right, and whethe
 teammate out did better than projected. It also saves:
   archive\\scores-<date>.csv   every graded projection, so a record builds up over time
   site\\scorecard.json         the same report as data, for the "Last night" tab on the website
+  site\\days\\<date>.json      that day's pre-game slate with final stats, for the day buttons on the website
 """
 
 import argparse
@@ -32,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 import project as P
+from export_results import build_results
 
 HERE = Path(__file__).parent
 DEFAULT_STATS = ["pts", "reb", "ast", "pra", "fg3m"]
@@ -101,6 +103,38 @@ def history_from_archive(archive):
     return nights, pooled
 
 
+def write_days_index(days_dir):
+    """site/days/index.json lists the days the website can show: [{date, games, final}]."""
+    items = []
+    for f in sorted(days_dir.glob("????-??-??.json")):
+        try:
+            d = json.load(open(f, encoding="utf-8"))
+            items.append(dict(date=f.stem, games=len(d["games"]), final=len(d["results"]["meta"]["games_final"])))
+        except (OSError, ValueError, KeyError):
+            continue
+    with open(days_dir / "index.json", "w", encoding="utf-8") as fh:
+        json.dump(dict(days=items), fh, separators=(",", ":"))
+    return items
+
+
+def write_day(slate, injuries_path, db, days_dir):
+    """Save the pre-game slate + the final stats + the game-time injury list as one file for that day."""
+    days_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db)
+    results = build_results(conn, slate)
+    conn.close()
+    day = dict(slate)
+    day["results"] = results
+    day["inj"] = None
+    if injuries_path and Path(injuries_path).exists():
+        day["inj"] = json.load(open(injuries_path, encoding="utf-8"))
+    path = days_dir / f"{slate['meta']['slate_date']}.json"
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(day, fh, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    items = write_days_index(days_dir)
+    return path, len(items)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Grade a night's projections.")
     ap.add_argument("--slate", default=str(HERE / "site" / "slate.json"), help="the PRE-GAME slate.json")
@@ -110,6 +144,8 @@ def main():
     ap.add_argument("--json", default=str(HERE / "site" / "scorecard.json"), help="where to write the website data")
     ap.add_argument("--no-save", action="store_true", help="don't write the scores CSV")
     ap.add_argument("--no-json", action="store_true", help="don't write scorecard.json")
+    ap.add_argument("--days-dir", default=str(HERE / "site" / "days"), help="where the per-day files for the website go")
+    ap.add_argument("--no-days", action="store_true", help="don't write the per-day file")
     args = ap.parse_args()
 
     slate = json.load(open(args.slate, encoding="utf-8"))
@@ -272,6 +308,9 @@ def main():
         with open(path, "w", encoding="utf-8") as f:
             json.dump(card, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         print(f"Saved {path} (for the website's Last night tab)")
+    if not args.no_days:
+        path, n = write_day(slate, args.injuries if have_injuries else None, args.db, Path(args.days_dir))
+        print(f"Saved {path} ({n} day{'s' if n != 1 else ''} available on the website)")
     print("Analysis only, not betting advice.")
 
 

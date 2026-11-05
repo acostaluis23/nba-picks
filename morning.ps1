@@ -24,6 +24,8 @@ Write-Host "`n--- 3. Build today's projections ---"
 & $py build_slate.py 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { Write-Host "No slate built (maybe no games today). Stopping."; Stop-Transcript | Out-Null; exit 1 }
 
+& $py export_results.py 2>&1 | Out-Host
+
 Write-Host "`n--- 4. Save the pre-game copy ---"
 $info = (& $py -c "import json; m = json.load(open('site/slate.json', encoding='utf-8'))['meta']; print(m['slate_date'], m['data_through'])") -split ' '
 $day = $info[0]
@@ -35,6 +37,10 @@ if ($info[1] -lt $day) {
     Write-Host "Not archiving: this slate was built with data through $($info[1]), so it already includes the games."
     Write-Host "The existing archive copy (if any) was left alone."
 }
+
+Write-Host "`n--- 4b. Preview the next day ---"
+& $py build_slate.py --preview 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { Write-Host "(Preview failed. Continuing without it.)" }
 
 Write-Host "`n--- 5. Publish ---"
 & (Join-Path $root "deploy.ps1") | Out-Host

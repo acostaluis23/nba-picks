@@ -12,6 +12,8 @@ Useful options:
   python build_slate.py --stats pts,reb,ast   only these stats
   python build_slate.py --fast                skip the "ignore last season" versions
   python build_slate.py --out site/slate.json where to write the file
+  python build_slate.py --preview             the NEXT day's slate (schedule from ESPN) -> site/preview.json
+  python build_slate.py --date 2026-11-06     that specific day, same idea
 
 For every game tonight it picks each team's rotation players, projects every stat
 with the same model as project.py, and saves the numbers plus last-5-games and
@@ -29,6 +31,8 @@ from pathlib import Path
 import project as P
 
 DEFAULT_OUT = Path(__file__).parent / "site" / "slate.json"
+PREVIEW_OUT = Path(__file__).parent / "site" / "preview.json"
+ESPN_ABBR = {"GS": "GSW", "NY": "NYK", "SA": "SAS", "NO": "NOP", "UTAH": "UTA", "WSH": "WAS"}
 EXTRA_KEYS = ["dd", "td"]
 
 
@@ -57,6 +61,76 @@ def fetch_slate():
             start=g.get("gameEt") or g.get("gameTimeUTC") or "",
         ))
     return slate_date, games
+
+
+def fetch_espn_slate(day):
+    """The games on one day (YYYY-MM-DD, Eastern date) from ESPN's scoreboard. Used for the next-day preview,
+    because the NBA's own live scoreboard only shows today. An empty list means no games that day."""
+    import requests
+    url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=" + day.replace("-", "")
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                             "Chrome/124.0 Safari/537.36", "Accept": "application/json"}
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        events = r.json().get("events", [])
+    except Exception as e:  # noqa: BLE001 - any failure means we cannot preview
+        raise P.PickError(f"Could not read the schedule from ESPN: {e}")
+    games = []
+    for ev in events:
+        try:
+            comp = ev["competitions"][0]["competitors"]
+            away = next(c for c in comp if c["homeAway"] == "away")["team"]["abbreviation"]
+            home = next(c for c in comp if c["homeAway"] == "home")["team"]["abbreviation"]
+        except (KeyError, IndexError, StopIteration):
+            continue
+        text = (((ev.get("status") or {}).get("type") or {}).get("shortDetail") or "").strip()
+        if " - " in text:                      # "11/6 - 7:00 PM EST" -> "7:00 PM EST"
+            text = text.split(" - ", 1)[1].strip()
+        games.append(dict(game_id="espn-" + str(ev.get("id")), away=ESPN_ABBR.get(away, away),
+                          home=ESPN_ABBR.get(home, home), time=text, start=ev.get("date", "")))
+    return day, games
+
+
+def next_day_after(live_path):
+    """The day after the slate on the site (so the preview is always 'tomorrow' relative to what's shown)."""
+    try:
+        d = dt.date.fromisoformat(json.load(open(live_path, encoding="utf-8"))["meta"]["slate_date"])
+    except (OSError, ValueError, KeyError):
+        d = dt.date.today()
+    return (d + dt.timedelta(days=1)).isoformat()
+
+
+def attach_changes(data, old):
+    """Remember where each projection stood in the previous build, so the page can show what moved.
+    If a number did not change this time, the earlier 'previous' value is kept."""
+    before = {}
+    for p in old.get("players", []):
+        for k, blk in p["stats"].items():
+            if not blk:
+                continue
+            if blk.get("proj") is not None:
+                before[(p["id"], k, False)] = (blk["proj"], blk.get("prev"))
+            cur = blk.get("cur")
+            if cur and cur.get("proj") is not None:
+                before[(p["id"], k, True)] = (cur["proj"], cur.get("prev"))
+    moved = 0
+    for p in data["players"]:
+        for k, blk in p["stats"].items():
+            if not blk:
+                continue
+            for is_cur, b in ((False, blk), (True, blk.get("cur"))):
+                if not b or b.get("proj") is None:
+                    continue
+                old_proj, old_prev = before.get((p["id"], k, is_cur), (None, None))
+                if old_proj is None:
+                    continue
+                if abs(old_proj - b["proj"]) > 1e-9:
+                    b["prev"] = old_proj
+                    moved += 1
+                elif old_prev is not None:
+                    b["prev"] = old_prev
+    return moved
 
 
 # ----------------------------- player selection -----------------------------
@@ -195,7 +269,11 @@ def build(ctx, slate_date, games, stat_keys, per_team, min_minutes, with_current
 
 def main():
     ap = argparse.ArgumentParser(description="Build site/slate.json for tonight's games.")
-    ap.add_argument("--out", default=str(DEFAULT_OUT), help="where to write the JSON file")
+    ap.add_argument("--out", default=None, help="where to write the JSON file")
+    ap.add_argument("--preview", action="store_true",
+                    help="build the NEXT day's slate (schedule from ESPN) into site/preview.json")
+    ap.add_argument("--date", help="build this specific day (YYYY-MM-DD) from ESPN's schedule, as a preview")
+    ap.add_argument("--live-slate", default=str(DEFAULT_OUT), help=argparse.SUPPRESS)
     ap.add_argument("--db", help="path to nba.db (default: next to project.py)")
     ap.add_argument("--per-team", type=int, default=9, help="players per team (default 9)")
     ap.add_argument("--min-minutes", type=float, default=14.0,
@@ -217,20 +295,37 @@ def main():
 
         print("Loading the database...")
         ctx = P.load_context(args.db)
-        print("Asking the NBA for tonight's games...")
-        slate_date, games = fetch_slate()
-        if not games:
-            raise P.PickError("No games on tonight's schedule.")
-        print(f"{slate_date}: {len(games)} games. Data through {ctx.last_date}.")
-        try:
-            behind = (dt.date.fromisoformat(slate_date) - dt.date.fromisoformat(ctx.last_date)).days
-            if behind > 2:
-                print(f"  ! The data is {behind} days old. Run: python ingest.py --current")
-        except ValueError:
-            pass
+        preview = bool(args.preview or args.date)
+        out = Path(args.out) if args.out else (PREVIEW_OUT if preview else DEFAULT_OUT)
+        if preview:
+            day = args.date or next_day_after(args.live_slate)
+            print(f"Asking ESPN for the games on {day}...")
+            slate_date, games = fetch_espn_slate(day)
+            print(f"{slate_date}: {len(games) or 'no'} games. Data through {ctx.last_date}.")
+        else:
+            print("Asking the NBA for tonight's games...")
+            slate_date, games = fetch_slate()
+            if not games:
+                raise P.PickError("No games on tonight's schedule.")
+            print(f"{slate_date}: {len(games)} games. Data through {ctx.last_date}.")
+            try:
+                behind = (dt.date.fromisoformat(slate_date) - dt.date.fromisoformat(ctx.last_date)).days
+                if behind > 2:
+                    print(f"  ! The data is {behind} days old. Run: python ingest.py --current")
+            except ValueError:
+                pass
 
         data = build(ctx, slate_date, games, stat_keys, args.per_team, args.min_minutes, not args.fast)
-        out = Path(args.out)
+        if preview:
+            data["meta"]["preview"] = True
+        # What moved since the last build for this same day? (a preview of today's date is the previous build)
+        try:
+            old = json.load(open(out if preview else PREVIEW_OUT, encoding="utf-8"))
+            if old.get("meta", {}).get("slate_date") == str(slate_date):
+                moved = attach_changes(data, old)
+                print(f"  {moved} projections changed since the previous build.")
+        except (OSError, ValueError, KeyError):
+            pass
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)

@@ -19,7 +19,7 @@
     TOR: ["#5a1e2a", "#e4e4e4"], UTA: ["#2a2f5a", "#ffe08a"], WAS: ["#1d3a6b", "#ffc2c7"]
   };
 
-  var state = { data: null, inj: null, score: null, stat: "pts", game: "all", q: "", cur: false, showOut: false, lines: {} };
+  var state = { data: null, slate: null, preview: null, slateDate: "", day: null, days: [], dayCache: {}, liveInj: null, liveRes: null, res: null, finalGames: {}, inj: null, score: null, stat: "pts", game: "all", q: "", cur: false, showOut: false, lines: {} };
   var byId = {};
   var injMap = {};
   var lastY = 0;
@@ -181,6 +181,12 @@
     $("gameTabs").innerHTML = tabs.join("");
   }
   function renderList() {
+    if (!state.data.games.length) {
+      $("cards").innerHTML = "";
+      $("listNote").hidden = true;
+      $("listMsg").innerHTML = '<p class="empty">No games scheduled for ' + esc(dayLabel(state.data.meta.slate_date)) + ".</p>";
+      return;
+    }
     var q = plain(state.q.trim());
     var items = [], hidden = 0, outHidden = 0;
     state.data.players.forEach(function (p) {
@@ -208,12 +214,13 @@
       var badges = statusBadge(p);
       if (p.b2b) badges += '<span class="badge">Back-to-back</span>';
       if (teammatesOut(p).length) badges += '<span class="badge">Teammate out</span>';
-      return '<a class="card' + (isOut(p) ? " dim" : "") + '" href="#/p/' + p.id + "/" + state.stat + '">' +
+      return '<a class="card' + (isOut(p) ? " dim" : "") + '" href="' + pHref(p.id, state.stat) + '">' +
         '<div class="who">' + avatar(p) + "<div><div class=\"name\">" + esc(p.name) + '</div><div class="meta">' +
         esc(p.team) + "</div></div></div>" +
-        "<div><div class=\"big\">" + esc(big) + '</div><div class="big-label">' + esc(sub) + "</div></div>" +
+        "<div><div class=\"big\">" + esc(big) + '</div><div class="big-label">' + esc(sub) + (special ? "" : changeHtml(b)) + "</div></div>" +
+        resultHtml(p, state.stat, b) +
         '<div class="foot"><span class="r1">' + esc(range) + '</span><span class="r2">' +
-        esc(matchup(p) + (timeOf(p) ? " · " + timeOf(p) : "")) + "</span></div>" +
+        esc(matchup(p) + (gameTime(p) ? " · " + gameTime(p) : "")) + "</span></div>" +
         '<div class="badges">' + badges + "</div></a>";
     }).join("");
 
@@ -240,15 +247,36 @@
     return n;
   }
   function renderSub() {
-    var m = state.data.meta, parts = m.slate_date.split("-");
-    var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
-    var dd = m.data_through.split("-");
-    var through = new Date(+dd[0], +dd[1] - 1, +dd[2]);
-    var o = { month: "short", day: "numeric" };
-    $("subline").textContent = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) +
-      " · " + state.data.games.length + " games · " + state.data.players.length +
-      " players · data through " + through.toLocaleDateString("en-US", o) +
-      (state.inj ? " · injuries updated " + clock(state.inj.meta.generated_at) : "");
+    var m = state.data.meta;
+    var nGames = state.data.games.length;
+    var fin = state.res ? state.res.meta.games_final.length : 0;
+    var live = state.data === state.slate;
+    var isPrev = !!state.preview && state.data === state.preview;
+    var parts = [dayLabel(m.slate_date), fin ? fin + " of " + nGames + " games final" : (nGames ? nGames + " games" : "no games"),
+      state.data.players.length + " players"];
+    if (live || isPrev) {
+      var dd = m.data_through.split("-");
+      parts.push("data through " + new Date(+dd[0], +dd[1] - 1, +dd[2]).toLocaleDateString("en-US", { month: "short", day: "numeric" }));
+      if (state.inj && clock(state.inj.meta.generated_at)) parts.push("injuries updated " + clock(state.inj.meta.generated_at));
+    } else {
+      parts.push("projected before tip-off");
+      if (state.inj && clock(state.inj.meta.generated_at)) parts.push("injuries as of " + clock(state.inj.meta.generated_at));
+    }
+    $("subline").textContent = parts.join(" · ");
+    $("dayTitle").textContent = dayWord(m.slate_date);
+    $("previewNote").hidden = !isPrev || !nGames;
+    if (isPrev) {
+      $("previewNote").textContent = "Preview. These projections use games through " + shortDate(m.data_through) +
+        ". Lineups and injuries can change before tip-off, and the numbers update as new results come in.";
+    }
+
+    var dates = availableDates(), i = dates.indexOf(state.day);
+    $("dayNav").hidden = false;
+    $("daySelect").innerHTML = dates.slice().reverse().map(function (d) {
+      return '<option value="' + d + '"' + (d === state.day ? " selected" : "") + ">" + esc(dayLabel(d)) + "</option>";
+    }).join("");
+    $("dayPrev").disabled = i <= 0;
+    $("dayNext").disabled = i < 0 || i >= dates.length - 1;
   }
 
   // ---------- detail view ----------
@@ -263,14 +291,14 @@
 
     var g = gameOf(p);
     var tabs = STAT_ORDER.filter(function (k) { return p.stats[k]; }).map(function (k) {
-      return '<a class="chip' + (k === stat ? " on" : "") + '" href="#/p/' + p.id + "/" + k + '">' + esc(label(k)) + "</a>";
+      return '<a class="chip' + (k === stat ? " on" : "") + '" href="' + pHref(p.id, k) + '">' + esc(label(k)) + "</a>";
     }).join("");
 
     var html = "";
-    html += '<a class="back" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    html += '<a class="back" href="' + dayHash(state.day) + '"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
       'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Slate</a>';
     html += '<div class="hero">' + avatar(p, true) + "<div><h1>" + esc(p.name) + '</h1><div class="meta">' +
-      esc(p.team + " · " + matchup(p) + (g && g.time ? " · " + g.time : "")) + '</div><div class="badges">' +
+      esc(p.team + " · " + matchup(p) + (gameTime(p) ? " · " + gameTime(p) : "")) + '</div><div class="badges">' +
       statusBadge(p) + (p.b2b ? '<span class="badge">Back-to-back</span>' : "") +
       "</div></div></div>";
     html += injuryPanel(p);
@@ -290,6 +318,8 @@
       html += '<p class="warn">' + esc(w) + "</p>";
     });
 
+    html += changeNote(block);
+    html += resultPanel(p, stat, block, special);
     if (special) {
       html += specialPanel(p, stat, block);
     } else {
@@ -656,6 +686,164 @@
   }
 
   // ---------- wiring ----------
+  // ---------- days, results and refreshing ----------
+  var detailRe = /^#\/p\/(\d+)\/(\w+)(?:\/(\d{4}-\d{2}-\d{2}))?/;
+  var dayRe = /^#\/d\/(\d{4}-\d{2}-\d{2})/;
+
+  function loadJSON(url) {
+    return fetch(url, { cache: "no-cache" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function isoOf(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function parseISO(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function addDays(s, n) { var d = parseISO(s); d.setDate(d.getDate() + n); return isoOf(d); }
+  function dayLabel(s) { return parseISO(s).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
+  function dayWord(s) {
+    var t = isoOf(new Date());
+    if (s === t) return state.res && state.res.meta.all_final ? "Today" : "Tonight";
+    if (s === addDays(t, -1)) return "Yesterday";
+    if (s === addDays(t, 1)) return "Tomorrow";
+    return dayLabel(s);
+  }
+  function availableDates() {
+    var set = {};
+    state.days.forEach(function (d) { set[d] = 1; });
+    if (state.slateDate) set[state.slateDate] = 1;
+    if (previewOK()) set[state.preview.meta.slate_date] = 1;
+    return Object.keys(set).sort();
+  }
+  // The next-day preview only counts while it is later than the slate that is live.
+  function previewOK() { return !!state.preview && state.preview.meta.slate_date > state.slateDate; }
+  function hasDayFile(d) { return state.days.indexOf(d) !== -1; }
+  function dayHash(d) { return !d || d === state.slateDate ? "#/" : "#/d/" + d; }
+  function pHref(id, stat) {
+    return "#/p/" + id + "/" + stat + (state.day && state.day !== state.slateDate ? "/" + state.day : "");
+  }
+  function liveRes() {
+    var r = state.liveRes;
+    return r && r.meta && r.meta.slate_date === state.slateDate ? r : null;
+  }
+  function gameTime(p) { return state.finalGames[p.game_id] ? "Final" : timeOf(p); }
+
+  function useInj(j) {
+    injMap = {};
+    state.inj = j || null;
+    if (j) {
+      j.news = j.news || [];
+      (j.players || []).forEach(function (e) { injMap[normName(e.name)] = e; });
+    }
+  }
+  function setRes(res) {
+    state.res = res && res.players ? res : null;
+    state.finalGames = {};
+    if (state.res) state.res.meta.games_final.forEach(function (id) { state.finalGames[id] = 1; });
+  }
+  function useData(data, res, inj) {
+    state.data = data;
+    byId = {};
+    data.players.forEach(function (p) { byId[p.id] = p; });
+    setRes(res);
+    useInj(inj);
+    if (!data.meta.stat_labels[state.stat]) state.stat = Object.keys(data.meta.stat_labels)[0];
+    if (state.game !== "all" && !data.games.some(function (g) { return g.game_id === state.game; })) state.game = "all";
+    state.cur = !!data.meta.has_current_only && load("ignoreLast") === "1";
+    $("curToggle").setAttribute("aria-pressed", state.cur);
+    var none = !data.games.length;
+    ["statChips", "gameTabs", "search"].forEach(function (id) { $(id).hidden = none; });
+    $("curToggle").closest(".toggle-card").hidden = none || !data.meta.has_current_only;
+    $("outRow").hidden = none || !state.inj;
+    renderSub(); renderChips(); renderTabs();
+  }
+  function selectDay(date) {
+    if (availableDates().indexOf(date) === -1) date = state.slateDate;
+    state.day = date;
+    if (hasDayFile(date)) {
+      var c = state.dayCache[date];
+      if (c) { useData(c, c.results, c.inj); return Promise.resolve(); }
+      $("subline").textContent = "Loading…";
+      $("cards").innerHTML = "";
+      return loadJSON("days/" + date + ".json").then(function (d) {
+        var keys = Object.keys(state.dayCache);
+        if (keys.length >= 3) delete state.dayCache[keys[0]];
+        state.dayCache[date] = d;
+        if (state.day === date) useData(d, d.results, d.inj);
+      }).catch(function () {
+        state.days = state.days.filter(function (x) { return x !== date; });
+        return selectDay(state.slateDate);
+      });
+    }
+    if (previewOK() && date === state.preview.meta.slate_date) {
+      useData(state.preview, null, state.liveInj);
+      return Promise.resolve();
+    }
+    useData(state.slate, liveRes(), state.liveInj);
+    return Promise.resolve();
+  }
+
+  // ---------- changes since the last build ----------
+  function movedBy(b) {
+    if (!b || b.prev == null || b.proj == null) return 0;
+    var d = b.proj - b.prev;
+    return Math.abs(d) < 0.5 ? 0 : d;
+  }
+  function changeHtml(b) {
+    var d = movedBy(b);
+    if (!d) return "";
+    return '<span class="delta ' + (d > 0 ? "up" : "down") + '" title="Change since the last update">' +
+      (d > 0 ? "\u25b2 " : "\u25bc ") + Math.abs(d).toFixed(1) + "</span>";
+  }
+  function changeNote(b) {
+    if (!movedBy(b)) return "";
+    return '<p class="note" style="margin-top:12px">The projection moved from ' + fmt(b.prev) + " to " + fmt(b.proj) +
+      " since the last update.</p>";
+  }
+
+  // ---------- final results ----------
+  function shown(v) { return Number.isInteger(v) ? String(v) : fmt(v); }
+  function toneOf(v, b) { return v > b.hi ? "above" : v < b.lo ? "below" : "in"; }
+  function resultHtml(p, stat, b) {
+    if (!state.res) return "";
+    var r = state.res.players[p.id];
+    if (!r) return state.finalGames[p.game_id] ? '<div class="res dnp"><span class="rl">Did not play</span></div>' : "";
+    var v = r[stat];
+    if (v == null) return "";
+    if (isSpecial(stat)) {
+      return '<div class="res ' + (v ? "above" : "in") + '"><span class="rl">Final</span><b>' + (v ? "Yes" : "No") + "</b></div>";
+    }
+    var tone = toneOf(v, b), d = v - b.proj;
+    var arrow = tone === "above" ? "▲ " : tone === "below" ? "▼ " : "";
+    return '<div class="res ' + tone + '"><span class="rl">Final</span><b>' + arrow + shown(v) + "</b>" +
+      '<span class="rd">' + (Math.abs(d) < 0.05 ? "on the number" : signed(d) + " vs projection") + "</span></div>";
+  }
+  function resultPanel(p, stat, b, special) {
+    if (!state.res) return "";
+    var r = state.res.players[p.id];
+    if (!r) {
+      return state.finalGames[p.game_id] ? '<section class="panel result"><h2>Final</h2><p class="soon">Did not play.</p></section>' : "";
+    }
+    var v = r[stat];
+    if (v == null) return "";
+    var big, side, tone;
+    if (special) {
+      tone = v ? "above" : "in";
+      big = v ? "Yes" : "No";
+      side = '<div class="a">Model chance ' + pct(b.p) + "</div>";
+    } else {
+      tone = toneOf(v, b);
+      big = shown(v);
+      side = '<div class="a">Projected ' + fmt(b.proj) + '</div><div class="b">Typical ' + fmt(b.lo) + " – " + fmt(b.hi) + "</div>";
+    }
+    var where = special || tone === "in" ? "" : (tone === "above" ? "Above" : "Below") + " the typical range. ";
+    return '<section class="panel result"><div class="proj-row"><div><div class="big-label">Final ' +
+      esc(label(stat).toLowerCase()) + '</div><div class="proj-num res-' + tone + '">' + esc(big) + "</div></div>" +
+      '<div class="proj-side">' + side + "</div></div>" +
+      '<p class="note">' + where + "Played " + fmt(r.m, 0) + " min (projected " + fmt(minutesOf(p), 0) + ").</p></section>";
+  }
+
+  // ---------- wiring ----------
   function toggleCur() {
     state.cur = !state.cur;
     store("ignoreLast", state.cur ? "1" : "0");
@@ -663,41 +851,67 @@
     route();
   }
   function route() {
-    var m = location.hash.match(/^#\/p\/(\d+)\/(\w+)/);
-    var onLast = location.hash === "#/last" && !!state.score;
-    if (!$("listView").hidden) lastY = window.scrollY;
-    $("nav").hidden = !!m || !state.score;
-    $("navTonight").setAttribute("aria-current", !onLast && !m ? "page" : "false");
-    $("navLast").setAttribute("aria-current", onLast ? "page" : "false");
-    if (m) {
-      $("listView").hidden = true;
-      $("lastView").hidden = true;
-      $("detailView").hidden = false;
-      showDetail(+m[1], m[2]);
-      window.scrollTo(0, 0);
-    } else if (onLast) {
-      $("listView").hidden = true;
-      $("detailView").hidden = true;
-      $("lastView").hidden = false;
-      renderLast();
-      window.scrollTo(0, 0);
-    } else {
-      $("detailView").hidden = true;
-      $("lastView").hidden = true;
-      $("listView").hidden = false;
-      renderList();
-      window.scrollTo(0, lastY);
+    var h = location.hash, m = h.match(detailRe), md = h.match(dayRe);
+    var onLast = h === "#/last" && !!state.score;
+    var target = m ? (m[3] || state.slateDate) : md ? md[1] : state.slateDate;
+    var reset = !m && !onLast && !!state.data && target !== state.day;
+
+    function render() {
+      if (reset) lastY = 0;
+      else if (!$("listView").hidden) lastY = window.scrollY;
+      $("nav").hidden = !!m || !state.score;
+      $("navTonight").setAttribute("aria-current", !onLast && !m ? "page" : "false");
+      $("navLast").setAttribute("aria-current", onLast ? "page" : "false");
+      if (m) {
+        $("listView").hidden = true;
+        $("lastView").hidden = true;
+        $("detailView").hidden = false;
+        showDetail(+m[1], m[2]);
+        window.scrollTo(0, 0);
+      } else if (onLast) {
+        $("listView").hidden = true;
+        $("detailView").hidden = true;
+        $("lastView").hidden = false;
+        renderLast();
+        window.scrollTo(0, 0);
+      } else {
+        $("detailView").hidden = true;
+        $("lastView").hidden = true;
+        $("listView").hidden = false;
+        renderList();
+        window.scrollTo(0, lastY);
+      }
     }
+    if (state.data && (onLast || target === state.day)) render();
+    else selectDay(target).then(render);
+  }
+  function rerender() {
+    var m = location.hash.match(detailRe);
+    if (!$("detailView").hidden && m) showDetail(+m[1], m[2]);
+    else if (!$("listView").hidden) renderList();
+  }
+  // Quietly pull fresh injuries and results while the page is open.
+  function refresh() {
+    if (document.hidden || !state.data) return;
+    Promise.all([loadInjuries(), loadResults(), loadPreview()]).then(function () {
+      var onPreview = previewOK() && state.day === state.preview.meta.slate_date;
+      if (!onPreview && state.data !== state.slate) { renderSub(); return; }
+      var a = document.activeElement;
+      if (a && a.tagName === "INPUT") return;
+      if (onPreview) {
+        useData(state.preview, null, state.liveInj);
+      } else {
+        useInj(state.liveInj);
+        setRes(liveRes());
+        renderSub();
+      }
+      rerender();
+    });
   }
 
   function start(data) {
-    state.data = data;
-    data.players.forEach(function (p) { byId[p.id] = p; });
-    if (!data.meta.stat_labels[state.stat]) state.stat = Object.keys(data.meta.stat_labels)[0];
-    state.cur = !!data.meta.has_current_only && load("ignoreLast") === "1";
-    $("curToggle").setAttribute("aria-pressed", state.cur);
-    if (!data.meta.has_current_only) $("curToggle").closest(".toggle-card").hidden = true;
-    renderSub(); renderChips(); renderTabs();
+    state.slate = data;
+    state.slateDate = data.meta.slate_date;
 
     $("curToggle").addEventListener("click", toggleCur);
     $("statChips").addEventListener("click", function (e) {
@@ -711,11 +925,17 @@
       state.game = b.dataset.game; renderTabs(); renderList();
     });
     $("search").addEventListener("input", function (e) { state.q = e.target.value; renderList(); });
-    if (state.inj) {
-      $("outRow").hidden = false;
-      $("showOut").addEventListener("change", function (e) { state.showOut = e.target.checked; renderList(); });
+    $("showOut").addEventListener("change", function (e) { state.showOut = e.target.checked; renderList(); });
+    $("daySelect").addEventListener("change", function (e) { location.hash = dayHash(e.target.value); });
+    function step(n) {
+      var dates = availableDates(), d = dates[dates.indexOf(state.day) + n];
+      if (d) location.hash = dayHash(d);
     }
+    $("dayPrev").addEventListener("click", function () { step(-1); });
+    $("dayNext").addEventListener("click", function () { step(1); });
     window.addEventListener("hashchange", route);
+    setInterval(refresh, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
     route();
   }
 
@@ -725,22 +945,27 @@
     $("listMsg").innerHTML = '<div class="error">' + msg + "</div>";
   }
 
-  // Injuries are optional: if injuries.json is missing the page still works.
+  // Everything except slate.json is optional: if a file is missing the page still works.
   function loadInjuries() {
-    return fetch("injuries.json", { cache: "no-cache" })
-      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(function (j) {
-        j.news = j.news || [];
-        (j.players || []).forEach(function (e) { injMap[normName(e.name)] = e; });
-        state.inj = j;
-      })
-      .catch(function () { state.inj = null; });
+    return loadJSON("injuries.json")
+      .then(function (j) { j.news = j.news || []; state.liveInj = j; })
+      .catch(function () { /* keep whatever we had */ });
   }
-
-  // The Last night report is optional too: no scorecard.json, no tab.
+  function loadResults() {
+    return loadJSON("results.json").then(function (j) { state.liveRes = j; }).catch(function () { /* none yet */ });
+  }
+  function loadPreview() {
+    return loadJSON("preview.json")
+      .then(function (j) { state.preview = j && j.meta && j.games ? j : null; })
+      .catch(function () { /* no preview yet */ });
+  }
+  function loadDays() {
+    return loadJSON("days/index.json")
+      .then(function (j) { state.days = (j.days || []).map(function (d) { return d.date; }); })
+      .catch(function () { state.days = []; });
+  }
   function loadScore() {
-    return fetch("scorecard.json", { cache: "no-cache" })
-      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    return loadJSON("scorecard.json")
       .then(function (j) { state.score = j && j.meta && j.accuracy && j.accuracy.length ? j : null; })
       .catch(function () { state.score = null; });
   }
@@ -750,7 +975,9 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     })
-    .then(function (data) { return Promise.all([loadInjuries(), loadScore()]).then(function () { start(data); }); })
+    .then(function (data) {
+      return Promise.all([loadInjuries(), loadScore(), loadDays(), loadResults(), loadPreview()]).then(function () { start(data); });
+    })
     .catch(function () {
       fail("Couldn't load <code>slate.json</code>. Run <code>python build_slate.py</code> first. " +
         "If you opened <code>index.html</code> by double-clicking it, open it through a local server instead: " +
