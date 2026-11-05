@@ -19,7 +19,7 @@
     TOR: ["#5a1e2a", "#e4e4e4"], UTA: ["#2a2f5a", "#ffe08a"], WAS: ["#1d3a6b", "#ffc2c7"]
   };
 
-  var state = { data: null, inj: null, stat: "pts", game: "all", q: "", cur: false, showOut: false, lines: {} };
+  var state = { data: null, inj: null, score: null, stat: "pts", game: "all", q: "", cur: false, showOut: false, lines: {} };
   var byId = {};
   var injMap = {};
   var lastY = 0;
@@ -511,6 +511,150 @@
     return html + "</section>";
   }
 
+  // ---------- last night ----------
+  function longDate(iso) {
+    var p = iso.split("-");
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  }
+  function shortDate(iso) {
+    var p = iso.split("-");
+    return new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+  function signed(n, d) { var v = Number(n); return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d === undefined ? 1 : d); }
+  function highLow(bias) {
+    var b = Number(bias);
+    if (Math.abs(b) < 0.05) return "right on average";
+    return "ran " + Math.abs(b).toFixed(1) + (b > 0 ? " high" : " low");
+  }
+  function hitBar(v, target) {
+    return '<div class="hitbar"><span class="hitfill" style="width:' + Math.round(v * 100) + '%"></span>' +
+      '<span class="hittick" style="left:' + Math.round(target * 100) + '%"></span></div>';
+  }
+  function who(x) { return '<b>' + esc(x.name) + '</b> <span class="tm">' + esc(x.team) + "</span>"; }
+
+  function lastSummary(s) {
+    var acc = s.accuracy[0];
+    var inj = s.injury || {};
+    var html = '<div class="minis">';
+    if (acc) html += '<div class="mini"><b>' + fmt(acc.mae) + '</b><span>average miss, ' + esc(acc.label.toLowerCase()) + "</span></div>";
+    html += '<div class="mini"><b>' + fmt(s.minutes.projected, 0) + "→" + fmt(s.minutes.actual, 0) +
+      "</b><span>minutes, projected → played</span></div>";
+    if (inj.available) {
+      var sat = inj.listed_out - inj.played_anyway.length;
+      html += '<div class="mini"><b>' + sat + "/" + inj.listed_out + "</b><span>listed out, really sat</span></div>";
+    } else {
+      html += '<div class="mini"><b>' + s.meta.players_graded + "</b><span>players graded</span></div>";
+    }
+    return html + "</div>";
+  }
+
+  function lastAccuracy(s) {
+    var html = '<section class="panel"><h2>Did players land in our range?</h2>' +
+      '<p class="note">Every card shows a "Typical" range, built so about half of players should finish inside it. ' +
+      'Each bar is how many actually did. If the green stops near the white line, the ranges are the right width. ' +
+      'Past the line means they were a bit wide, short of it means a bit narrow.</p>';
+    s.accuracy.forEach(function (a) {
+      html += '<div class="accrow"><div class="acctop"><b>' + esc(a.label) + '</b>' +
+        '<span>missed by ' + fmt(a.mae) + " on average · " + highLow(a.bias) + "</span></div>" +
+        hitBar(a.inside50, 0.5) +
+        '<div class="accbot"><span>' + pct(a.inside50) + " inside the range</span><span>" + a.n + " players</span></div></div>";
+    });
+    return html + "</section>";
+  }
+
+  function surpriseList(items, tone) {
+    var html = '<div class="surp ' + tone + '">';
+    items.forEach(function (x) {
+      html += "<div><div>" + who(x) + '<div class="note">' + fmt(x.proj_min, 0) + " min projected, " + fmt(x.act_min, 0) +
+        " played</div></div>" + '<div class="surpnum"><span>' + fmt(x.proj) + "</span> → <b>" + fmt(x.actual) + "</b></div></div>";
+    });
+    return html + "</div>";
+  }
+  function lastSurprises(s) {
+    var sp = s.surprises;
+    if (!sp || !sp.beat) return "";
+    return '<section class="panel"><h2>Biggest surprises</h2><p class="note">' + esc(sp.label) +
+      ", projected → actual.</p>" +
+      '<div class="sub2">Beat the number</div>' + surpriseList(sp.beat, "up") +
+      '<div class="sub2">Fell short</div>' + surpriseList(sp.short, "down") + "</section>";
+  }
+
+  function lastInjury(s) {
+    var inj = s.injury;
+    if (!inj || !inj.available) return "";
+    var html = '<section class="panel"><h2>Was the injury list right?</h2>';
+    html += "<p>" + inj.listed_out + (inj.listed_out === 1 ? " player was" : " players were") + " listed out. " +
+      (inj.played_anyway.length === 0 ? "None" : inj.played_anyway.length) + " played anyway.</p>";
+    if (inj.played_anyway.length) {
+      html += '<div class="vslist">';
+      inj.played_anyway.forEach(function (x) { html += "<span><b>" + esc(x.name) + "</b> " + esc(x.team) + " · " + fmt(x.minutes, 0) + " min</span>"; });
+      html += "</div>";
+    }
+    html += '<p class="note">Listed questionable or day-to-day: ' + inj.flagged_played + " played, " + inj.flagged_dnp + " did not.</p>";
+    var n = inj.unlisted_dnp.length;
+    if (n) {
+      html += "<details><summary>" + n + " rotation players sat without being listed out</summary>" +
+        '<div class="vslist" style="margin-top:10px">';
+      inj.unlisted_dnp.forEach(function (x) { html += "<span><b>" + esc(x.name) + "</b> " + esc(x.team) + "</span>"; });
+      html += "</div></details>";
+    } else {
+      html += '<p class="note">Nobody surprising sat out.</p>';
+    }
+    return html + "</section>";
+  }
+
+  function teamRow(title, g, note) {
+    return '<div class="trow"><div><b>' + title + '</b><div class="note">' + g.n + " players" + (note || "") + "</div></div>" +
+      '<div class="tnum">' + signed(g.miss) + "</div></div>";
+  }
+  function lastTeammate(s) {
+    var t = s.teammate;
+    var pooled = s.pooled_teammate && s.pooled_teammate.nights >= 2 ? s.pooled_teammate : null;
+    if (!t && !pooled) return "";
+    var html = '<section class="panel"><h2>When a teammate sits</h2>' +
+      '<p class="note">Actual minus projected. If the first number keeps coming out clearly higher, our projections should add something when a rotation player is out.</p>';
+    if (t) {
+      html += '<div class="sub2">Last night, ' + esc(t.label.toLowerCase()) + "</div>" +
+        teamRow("A rotation teammate was out", t.with_out, " · " + signed(t.with_out.minutes) + " min vs projection") +
+        teamRow("Everyone else", t.without, " · " + signed(t.without.minutes) + " min vs projection");
+    }
+    if (pooled) {
+      html += '<div class="sub2">All ' + pooled.nights + " nights combined, points</div>" +
+        teamRow("A rotation teammate was out", { n: pooled.with_n, miss: pooled.with_miss }, " · " + signed(pooled.with_min) + " min") +
+        teamRow("Everyone else", { n: pooled.without_n, miss: pooled.without_miss }, " · " + signed(pooled.without_min) + " min");
+    }
+    return html + "</section>";
+  }
+
+  function lastHistory(s) {
+    var h = s.history || [];
+    var html = '<section class="panel"><h2>Track record</h2>';
+    if (h.length < 2) {
+      html += '<p class="note">One night is too small to judge anything. Come back after a few more nights and this fills in.</p>';
+      return html + "</section>";
+    }
+    html += '<p class="note">Points: average miss and how often the real number landed in the middle range.</p><div class="hist">';
+    h.slice().reverse().slice(0, 14).forEach(function (n) {
+      html += '<div class="histrow"><span class="hd">' + shortDate(n.date) + '</span>' +
+        '<span class="hm">' + fmt(n.pts_mae) + " miss</span>" + hitBar(n.inside50, 0.5) +
+        '<span class="hp">' + pct(n.inside50) + "</span></div>";
+    });
+    return html + "</div></section>";
+  }
+
+  function renderLast() {
+    var s = state.score;
+    var html = '<div class="top" style="padding-top:8px"><div><h1 class="title">Last night</h1>' +
+      '<p class="sub">' + esc(longDate(s.meta.slate_date)) + " · " + s.meta.games_done + " of " + s.meta.games_total +
+      " games · " + s.meta.players_graded + " players graded</p></div></div>";
+    html += '<section class="panel">' + lastSummary(s) + "</section>";
+    html += lastAccuracy(s) + lastSurprises(s) + lastInjury(s) + lastTeammate(s) + lastHistory(s);
+    html += '<p class="note footer">Projections were saved before tip-off, then compared with the final box scores. ' +
+      "One night is a small sample, so the numbers will bounce around. Not betting advice.</p>";
+    $("lastView").innerHTML = html;
+  }
+
   // ---------- wiring ----------
   function toggleCur() {
     state.cur = !state.cur;
@@ -520,14 +664,26 @@
   }
   function route() {
     var m = location.hash.match(/^#\/p\/(\d+)\/(\w+)/);
+    var onLast = location.hash === "#/last" && !!state.score;
+    if (!$("listView").hidden) lastY = window.scrollY;
+    $("nav").hidden = !!m || !state.score;
+    $("navTonight").setAttribute("aria-current", !onLast && !m ? "page" : "false");
+    $("navLast").setAttribute("aria-current", onLast ? "page" : "false");
     if (m) {
-      if (!$("listView").hidden) lastY = window.scrollY;
       $("listView").hidden = true;
+      $("lastView").hidden = true;
       $("detailView").hidden = false;
       showDetail(+m[1], m[2]);
       window.scrollTo(0, 0);
+    } else if (onLast) {
+      $("listView").hidden = true;
+      $("detailView").hidden = true;
+      $("lastView").hidden = false;
+      renderLast();
+      window.scrollTo(0, 0);
     } else {
       $("detailView").hidden = true;
+      $("lastView").hidden = true;
       $("listView").hidden = false;
       renderList();
       window.scrollTo(0, lastY);
@@ -581,12 +737,20 @@
       .catch(function () { state.inj = null; });
   }
 
+  // The Last night report is optional too: no scorecard.json, no tab.
+  function loadScore() {
+    return fetch("scorecard.json", { cache: "no-cache" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (j) { state.score = j && j.meta && j.accuracy && j.accuracy.length ? j : null; })
+      .catch(function () { state.score = null; });
+  }
+
   fetch("slate.json", { cache: "no-cache" })
     .then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     })
-    .then(function (data) { return loadInjuries().then(function () { start(data); }); })
+    .then(function (data) { return Promise.all([loadInjuries(), loadScore()]).then(function () { start(data); }); })
     .catch(function () {
       fail("Couldn't load <code>slate.json</code>. Run <code>python build_slate.py</code> first. " +
         "If you opened <code>index.html</code> by double-clicking it, open it through a local server instead: " +

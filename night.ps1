@@ -1,4 +1,4 @@
-# night.ps1 - after the games: pull the results and grade the projections.
+# night.ps1 - after the games: pull the results, grade the projections, publish the Last night tab.
 # It uses the pre-game copies saved in archive\ by morning.ps1 and pregame.ps1.
 #
 # Run by hand:  powershell -ExecutionPolicy Bypass -File .\night.ps1
@@ -20,6 +20,10 @@ Write-Host "Grading $day"
 
 $inj = "archive\injuries-$day.json"
 & $py score_night.py --slate "archive\slate-$day.json" --injuries $inj 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { Write-Host "Grading failed. Not publishing."; Stop-Transcript | Out-Null; exit 1 }
+
+Write-Host "`n--- Publish the Last night tab ---"
+& (Join-Path $root "deploy.ps1") | Out-Host
 
 Write-Host "=== Done $(Get-Date) ==="
 Stop-Transcript | Out-Null
