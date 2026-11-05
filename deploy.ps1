@@ -8,7 +8,7 @@
 
 $root = $PSScriptRoot
 $site = Join-Path $root "site"
-$repo = "https://github.com/acostaluis23/nba-picks.git"
+$repo = "https://acostaluis23@github.com/acostaluis23/nba-picks.git"
 $tmp  = Join-Path $env:TEMP "nba-picks-deploy"
 
 if (-not (Test-Path (Join-Path $site "index.html"))) {
