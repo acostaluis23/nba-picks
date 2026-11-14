@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>NBA Projections</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=20261114110118">
+</head>
+<body>
+
+<nav class="nav wrap" id="nav" aria-label="Pages" hidden>
+  <a href="#/" id="navTonight">Games</a>
+  <a href="#/last" id="navLast">Last night</a>
+</nav>
+
+<main id="listView" class="wrap">
+  <div class="top">
+    <div class="title-row">
+      <div>
+        <h1 class="title" id="dayTitle">Tonight</h1>
+        <p class="sub" id="subline">Loading...</p>
+      </div>
+    </div>
+
+    <div class="daynav" id="dayNav" hidden>
+      <button type="button" class="daybtn" id="dayPrev" aria-label="Previous day">&#8249;</button>
+      <select id="daySelect" aria-label="Pick a day"></select>
+      <button type="button" class="daybtn" id="dayNext" aria-label="Next day">&#8250;</button>
+    </div>
+    <p class="warn previewnote" id="previewNote" hidden></p>
+
+    <div class="toggle-card">
+      <div>
+        <div class="t1">Ignore last season</div>
+        <div class="t2">Project from this season's games only</div>
+      </div>
+      <button type="button" class="switch" id="curToggle" aria-pressed="false" aria-label="Ignore last season">
+        <span class="track"><span class="knob"></span></span>
+      </button>
+    </div>
+
+    <input class="search" id="search" type="search" placeholder="Search a player" aria-label="Search a player" autocomplete="off">
+  </div>
+
+  <div class="scroller" id="statChips" role="group" aria-label="Stat"></div>
+  <div class="tabs" id="gameTabs" role="group" aria-label="Game"></div>
+
+  <label class="check" id="outRow" hidden><input type="checkbox" id="showOut"> Show players listed out</label>
+  <div id="listNote" class="note" style="padding-top:12px" hidden></div>
+  <div class="grid" id="cards"></div>
+  <div id="listMsg"></div>
+
+  <p class="note footer">Projections are estimates from box-score history, not betting advice. Injury status comes from ESPN and can change before tip-off, so confirm who is playing.</p>
+</main>
+
+<main id="detailView" class="narrow" hidden></main>
+<main id="lastView" class="narrow" hidden></main>
+
+<script src="app.js?v=20261114110118"></script>
+</body>
+</html>
