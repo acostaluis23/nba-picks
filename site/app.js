@@ -1098,7 +1098,7 @@
       '<div class="fld"><span class="flbl">Stat</span><div class="cchips" id="hkChips" role="group" aria-label="Stat">' + chipsInner(keys, state.cstat) + "</div></div>" +
       '<div class="fld"><label class="flbl" for="hkNum">Number</label><div class="ckrow">' +
       '<input class="cin num" id="hkNum" type="text" inputmode="decimal" placeholder="e.g. 24.5" autocomplete="off" value="' + esc(state.hnum) + '">' +
-      '<button class="ckgo" type="submit">Check</button></div></div>' +
+      '<button class="ckgo" type="submit">Check</button></div><p class="ppfill" id="hkPP" role="status"></p></div>' +
       '<p class="cerr" id="hkErr" role="alert" hidden></p>' +
       '<p class="cap">Find the number in your app, then type it here. We show how often a player finishes above or below it.</p></form>';
   }
@@ -1165,7 +1165,7 @@
     var h = '<section class="hsec"><div class="hsh"><h2>' + (yd ? "Last night" : "How we did") + '</h2><a href="#/last">Full report</a></div><div class="hstats">';
     if (acc) {
       h += "<div><b>" + fmt(acc.mae) + "</b><span>Avg miss, " + esc(acc.label.toLowerCase()) + "</span></div>";
-      h += "<div><b>" + pct(acc.inside50) + "</b><span>In range (goal 50%)</span></div>";
+      h += "<div><b>" + pct(acc.inside50) + "</b><span>In range</span><em>goal 50%</em></div>";
     }
     if (inj.available) h += "<div><b>" + (inj.listed_out - inj.played_anyway.length) + "/" + inj.listed_out + "</b><span>Listed out, sat</span></div>";
     else h += "<div><b>" + s.meta.players_graded + "</b><span>Players graded</span></div>";
@@ -1210,7 +1210,24 @@
     $("hkPlayer").value = p.name;
     showSugg();
     $("hkErr").hidden = true;
+    autoFill();
     $("hkNum").focus();
+  }
+  // Picking a player (or a stat) fills in that player's PrizePicks line, if we have one.
+  // A number you typed yourself is never replaced.
+  function autoFill() {
+    var box = $("hkNum"), note = $("hkPP");
+    if (!box || !note) return;
+    var p = state.pick ? byId[state.pick] : null;
+    if (box.value && !state.hauto) { note.textContent = ""; return; }
+    var v = p ? ppLine(p, state.cstat, state.data.meta.slate_date) : null;
+    if (v === null) {
+      if (state.hauto) { box.value = ""; state.hnum = ""; state.hauto = false; }
+      note.textContent = p && state.pp ? "No PrizePicks line for this stat. Type the number from your app." : "";
+      return;
+    }
+    box.value = vtxt(v, state.cstat); state.hnum = box.value; state.hauto = true;
+    note.textContent = "PrizePicks line as of " + ppTime() + ". Change it if your app shows a different number.";
   }
   function submitHome() {
     state.hnum = $("hkNum").value;
@@ -1236,10 +1253,11 @@
     v.addEventListener("input", function (e) {
       if (e.target.id === "hkPlayer") {
         state.hq = e.target.value; state.pick = null;
+        if (state.hauto) { $("hkNum").value = ""; state.hnum = ""; state.hauto = false; $("hkPP").textContent = ""; }
         $("hkErr").hidden = true;
         showSugg();
       } else if (e.target.id === "hkNum") {
-        state.hnum = e.target.value;
+        state.hnum = e.target.value; state.hauto = false; $("hkPP").textContent = "";
         $("hkErr").hidden = true;
       }
     });
@@ -1247,7 +1265,7 @@
       var s = e.target.closest("[data-pid]");
       if (s) { pickPlayer(+s.dataset.pid); return; }
       var c = e.target.closest("[data-cstat]");
-      if (c) { state.cstat = c.dataset.cstat; $("hkChips").innerHTML = chipsInner(checkStats(null), state.cstat); return; }
+      if (c) { state.cstat = c.dataset.cstat; $("hkChips").innerHTML = chipsInner(checkStats(null), state.cstat); autoFill(); return; }
       if (e.target.closest("[data-more]")) {
         state.more = true;
         $("hkChips").innerHTML = chipsInner(checkStats(null), state.cstat);
@@ -1284,6 +1302,26 @@
     });
     return html + '</div><p class="note">Above ' + esc(vtxt(line, stat)) + " in " + above + " of the last " + rows.length + "." +
       (tie ? " Landed exactly on it in " + tie + "." : "") + " The orange line is your number.</p></section>";
+  }
+  // Past games against tonight's opponent, against the same number. Few games, so it's context only.
+  function vsLinePanel(p, stat, line) {
+    var rows = (p.vs_opp || []).filter(function (g) { return g.s && g.s[stat] != null; }).slice(0, 5);
+    if (!rows.length) return "";
+    var max = line, above = 0;
+    rows.forEach(function (g) { max = Math.max(max, g.s[stat]); });
+    max = Math.max(max * 1.15, 1);
+    var html = '<section class="panel lk"><h2>Last ' + (rows.length === 1 ? "game" : rows.length + " games") + " vs " + esc(p.opp) + "</h2><div>";
+    rows.forEach(function (g) {
+      var v = g.s[stat], d = parseISO(g.date);
+      if (v > line) above++;
+      var when = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " '" + String(d.getFullYear()).slice(2);
+      html += '<div class="gamerow"><div class="who2"><b>' + esc((g.home ? "vs " : "@ ") + g.opp) + "</b><span>" + esc(when) +
+        '</span></div><div class="track"><div class="fill' + (v > line ? " hi" : "") + '" style="width:' + (v / max * 100).toFixed(1) +
+        '%"></div><div class="tick" style="left:' + (line / max * 100).toFixed(1) + '%"></div></div><span class="val">' +
+        esc(vtxt(v, stat)) + "</span></div>";
+    });
+    return html + '</div><p class="note">Above ' + esc(vtxt(line, stat)) + " in " + above + " of " + rows.length +
+      ". Only a few games and some are from last season, so this is context, not a prediction.</p></section>";
   }
   function paintSave() {
     var c = state.chk, btn = $("ckSave");
@@ -1344,7 +1382,9 @@
       '</span><span><i style="background:var(--text)"></i>Projection ' + fmt(b.proj) +
       '</span><span><i style="background:var(--amber)"></i>Your number</span></div></section>';
 
+    h += whyPanel(p, stat, b);
     h += lastGamesPanel(p, stat, line);
+    h += vsLinePanel(p, stat, line);
 
     var entry = { id: id, stat: stat, line: line, date: state.day, name: p.name, team: p.team };
     state.chk.entry = entry;

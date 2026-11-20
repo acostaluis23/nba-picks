@@ -568,3 +568,10 @@ body.has-nav { padding-bottom: 86px; }
 .tg em { text-transform: uppercase; }
 .rangebar .mark { background: var(--text); }
 .hhero > div:first-child { min-width: 0; }
+
+/* PrizePicks auto-fill note, Last night goal, Games header */
+.ppfill { font-size: 12px; color: var(--amber); line-height: 1.4; margin-top: 6px; }
+.ppfill:empty { display: none; }
+.hstats em { font-style: normal; font-size: 11px; color: var(--muted); }
+#listView .title { font-size: 56px; line-height: 0.9; }
+#listView .sub { font-size: 12px; margin-top: 6px; }
