@@ -81,7 +81,8 @@
   function statusBadge(p) {
     var i = injInfo(p);
     if (!i) return '<span class="badge">Status unverified</span>';
-    var cls = i.kind === "ok" || i.kind === "probable" ? " ok" : (i.kind === "out" ? " out" : "");
+    if (i.kind === "ok") return "";
+    var cls = i.kind === "probable" ? " ok" : (i.kind === "out" ? " out" : "");
     return '<span class="badge' + cls + '">' + esc(i.label) + "</span>";
   }
   function teammatesOut(p) {
@@ -487,7 +488,7 @@
       '<div class="rail"></div><div class="span" style="left:' + pos(b.lo, sc) + "%;width:" + (pos(b.hi, sc) - pos(b.lo, sc)) +
       '%"></div><div class="mark" style="left:' + pos(b.proj, sc) + '%"></div><div class="linemark" id="lineMark" hidden></div></div>' +
       '<div class="scale"><span>' + sc.lo + "</span><span>" + Math.round(mid) + "</span><span>" + sc.hi + "</span></div></div>" +
-      '<div class="legend"><span><i style="background:var(--accent)"></i>Model ' + fmt(b.proj) +
+      '<div class="legend"><span><i style="background:var(--text)"></i>Model ' + fmt(b.proj) +
       '</span><span id="lineLegend" hidden><i style="background:var(--amber)"></i><span id="lineLegendText"></span></span></div></section>';
   }
 
@@ -666,7 +667,7 @@
   function lastAccuracy(s) {
     var html = '<section class="panel"><h2>Did players land in our range?</h2>' +
       '<p class="note">Every card shows a "Typical" range, built so about half of players should finish inside it. ' +
-      'Each bar is how many actually did. If the green stops near the white line, the ranges are the right width. ' +
+      'Each bar is how many actually did. If the blue stops near the white line, the ranges are the right width. ' +
       'Past the line means they were a bit wide, short of it means a bit narrow.</p>';
     s.accuracy.forEach(function (a) {
       html += '<div class="accrow"><div class="acctop"><b>' + esc(a.label) + '</b>' +
@@ -973,6 +974,7 @@
   // The model is rarely sure, so anything past 75% is shown as 75%+ (and the other side as <25%).
   function chanceTxt(x) { return x > 0.75 ? "75%+" : x < 0.25 ? "&lt;25%" : pct(x); }
   function chanceAria(x) { return x > 0.75 ? "over 75%" : x < 0.25 ? "under 25%" : pct(x); }
+  function countAttr(x) { return x > 0.75 || x < 0.25 ? "" : ' data-n="' + Math.round(x * 100) + '" data-d="0" data-s="%"'; }
   function barShare(x) { return Math.min(0.75, Math.max(0.25, x)); }
   function cHref(id, stat, line, date) {
     return "#/c/" + id + "/" + stat + (line != null ? "/" + line : "") + (date && date !== homeDate() ? "/" + date : "");
@@ -1048,7 +1050,7 @@
     }
     return -1;
   }
-  function updateNav() { $("navMine").hidden = !state.mine.length; }
+  function updateNav() { /* My numbers is always in the tab bar now */ }
 
   // ----- Home -----
   function firstTip(games) {
@@ -1089,7 +1091,7 @@
   function homeForm() {
     var keys = checkStats(null);
     if (keys.indexOf(state.cstat) === -1) state.cstat = keys[0] || "pts";
-    return '<form class="ckform" id="hkForm" novalidate aria-label="Check a number">' +
+    return '<form class="ckform" id="hkForm" novalidate aria-label="Check a number"><h2 class="fh">CHECK A NUMBER</h2>' +
       '<div class="fld"><label class="flbl" for="hkPlayer">Player</label>' +
       '<input class="cin" id="hkPlayer" type="search" placeholder="Search a player" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(state.hq) + '">' +
       '<div class="sugg" id="hkSugg" hidden></div></div>' +
@@ -1100,25 +1102,32 @@
       '<p class="cerr" id="hkErr" role="alert" hidden></p>' +
       '<p class="cap">Find the number in your app, then type it here. We show how often a player finishes above or below it.</p></form>';
   }
-  function homeGames(word) {
-    var g = state.data.games, tip = firstTip(g);
-    return '<section class="hsec"><div class="hsh"><h2>' + esc(word) + "</h2><span>" + plural(g.length, "game", "games") +
-      (tip ? " · first tip " + esc(tip) : "") + '</span></div><div class="gms">' + g.map(function (x) {
-        return '<button type="button" class="gm" data-game="' + esc(x.game_id) + '"><b>' + esc(x.away + " @ " + x.home) + "</b><i>" +
-          esc(state.finalGames[x.game_id] ? "Final" : (x.time || "").replace(/\s*(ET|EST|EDT)$/i, "")) + "</i></button>";
-      }).join("") + "</div></section>";
+  function teamDot(t) { var c = TEAM_COLORS[t] || ["", "#98989f"]; return '<i class="dot" style="background:' + c[1] + '"></i>'; }
+  function homeGames() {
+    var g = state.data.games;
+    if (!g.length) return "";
+    function one(x, copy) {
+      var fin = !!state.finalGames[x.game_id];
+      return '<button type="button" class="tg" data-game="' + esc(x.game_id) + '"' + (copy ? ' tabindex="-1" aria-hidden="true"' : "") + ">" +
+        teamDot(x.away) + "<b>" + esc(x.away) + "</b><span>@</span>" + teamDot(x.home) + "<b>" + esc(x.home) + '</b><em' + (fin ? ' class="fin"' : "") + ">" +
+        esc(fin ? "Final" : (x.time || "").replace(/\s*(ET|EST|EDT)$/i, "")) + "</em></button>";
+    }
+    var a = g.map(function (x) { return one(x, false); }).join(""), b = g.map(function (x) { return one(x, true); }).join("");
+    return '<div class="ticker" role="group" aria-label="Games"><div class="tk">' + a + b + "</div></div>";
   }
   function homeTop() {
     var rows = state.data.players.filter(function (p) { return !isOut(p) && getBlock(p, "pts"); })
       .sort(function (a, b) { return getBlock(b, "pts").proj - getBlock(a, "pts").proj; }).slice(0, 5);
     if (!rows.length) return "";
-    return '<section class="hsec"><div class="hsh"><h2>Top projections</h2><span>Points</span></div><div class="hbox">' +
+    return '<section class="hsec"><div class="hsh"><h2>Top projections</h2><span>POINTS</span></div><div class="hbox">' +
+      '<div class="hhead" aria-hidden="true"><span>#</span><span>PLAYER</span><span>MODEL</span><span>PP</span></div>' +
       rows.map(function (p, i) {
-        var b = getBlock(p, "pts"), tip = tipIn(curSrc(), p);
-        return '<a class="hp" href="' + pHref(p.id, "pts") + '"><span class="rk">' + (i + 1) + '</span><div><div class="pn">' + esc(p.name) +
-          '</div><div class="ps">' + esc(p.team + " " + matchup(p) + (tip ? " · " + tip : "")) + '</div></div><div class="pv"><b>' +
-          fmt(b.proj) + "</b><span>" + fmt(b.lo) + " – " + fmt(b.hi) + "</span></div></a>";
-      }).join("") + '<a class="hmore" href="' + dayHash(state.day) + '">See all players</a></div></section>';
+        var b = getBlock(p, "pts"), tip = tipIn(curSrc(), p), pp = ppLine(p, "pts", state.data.meta.slate_date);
+        return '<a class="hp t4" href="' + pHref(p.id, "pts") + '" aria-label="' + esc(p.name + ", model " + fmt(b.proj) +
+          (pp !== null ? ", PrizePicks " + vtxt(pp, "pts") : "")) + '"><span class="rk">' + (i + 1) + '</span><div><div class="pn">' + esc(p.name) +
+          '</div><div class="ps">' + esc(p.team + " " + matchup(p) + (tip ? " · " + tip : "")) + '</div></div><span class="num">' +
+          fmt(b.proj) + '</span><span class="num ' + (pp !== null ? 'pp">' + esc(vtxt(pp, "pts")) : 'na">–') + "</span></a>";
+      }).join("") + '<a class="hmore" href="' + dayHash(state.day) + '">All ' + state.data.players.length + " players</a></div></section>";
   }
   function homeChanges() {
     var rows = [];
@@ -1152,24 +1161,29 @@
   function homeLast() {
     var s = state.score;
     if (!s) return "";
-    var yd = s.meta.slate_date === addDays(isoOf(new Date()), -1);
-    return '<section class="hsec"><div class="hsh"><h2>' + (yd ? "How we did last night" : "How we did") + "</h2><span>" +
-      esc(dayLabel(s.meta.slate_date)) + '</span></div><div class="panel hln"><div class="acctop"><b>Did players land in our range?</b><span>' +
-      s.meta.players_graded + ' players</span></div>' + s.accuracy.slice(0, 3).map(function (a) {
-        return '<div class="accrow"><div class="acctop"><b>' + esc(a.label) + "</b><span>" + pct(a.inside50) +
-          " inside the range</span></div>" + hitBar(a.inside50, 0.5) + "</div>";
-      }).join("") + '<p class="cap">The white line is the goal: about half of players should finish inside their range.</p></div>' +
-      '<a class="btn full" href="#/last">See the full report</a></section>';
+    var yd = s.meta.slate_date === addDays(isoOf(new Date()), -1), acc = s.accuracy[0], inj = s.injury || {};
+    var h = '<section class="hsec"><div class="hsh"><h2>' + (yd ? "Last night" : "How we did") + '</h2><a href="#/last">Full report</a></div><div class="hstats">';
+    if (acc) {
+      h += "<div><b>" + fmt(acc.mae) + "</b><span>Avg miss, " + esc(acc.label.toLowerCase()) + "</span></div>";
+      h += "<div><b>" + pct(acc.inside50) + "</b><span>In range (goal 50%)</span></div>";
+    }
+    if (inj.available) h += "<div><b>" + (inj.listed_out - inj.played_anyway.length) + "/" + inj.listed_out + "</b><span>Listed out, sat</span></div>";
+    else h += "<div><b>" + s.meta.players_graded + "</b><span>Players graded</span></div>";
+    return h + "</div></section>";
   }
   function renderHome() {
     var d = state.data, word = dayWord(d.meta.slate_date);
-    var poss = word === "Tonight" ? "tonight's" : word === "Tomorrow" ? "tomorrow's" : word === "Today" ? "today's" : "this";
-    var h = '<section class="hhero"><h1>Check a number before tip-off</h1><p>Projections for every player on ' + poss +
-      " slate, built from box-score history. Type in a number from your app and see how likely it is.</p></section>";
+    var dt = parseISO(d.meta.slate_date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }).replace(",", " ·");
+    var fresh = [];
+    if (state.pp && state.pp.meta.slate_date === d.meta.slate_date && ppTime()) fresh.push("Lines " + ppTime());
+    if (state.inj && clock(state.inj.meta.generated_at)) fresh.push("Injuries " + clock(state.inj.meta.generated_at));
+    var h = '<section class="hhero"><div><div class="hd">' + esc(dt) + "</div><h1>" + esc(word) + '</h1></div><div class="hr">' +
+      (d.games.length ? '<span class="hn">' + d.games.length + "<small>" + (d.games.length === 1 ? "GAME" : "GAMES") + "</small></span>" : "") +
+      (fresh.length ? '<span class="fresh"><i></i><span>' + fresh.map(esc).join("<br>") + "</span></span>" : "") + "</div></section>";
     if (!d.games.length) {
       h += '<p class="empty">No games scheduled for ' + esc(dayLabel(d.meta.slate_date)) + ".</p>";
     } else {
-      h += homeForm() + homeGames(word) + homeTop() + homeChanges() + homeOut(word);
+      h += homeGames() + homeForm() + homeTop() + homeChanges() + homeOut(word);
     }
     h += homeLast();
     h += '<p class="note footer">Projections are estimates from box-score history, not betting advice. Injury status comes from ESPN and ' +
@@ -1309,11 +1323,11 @@
     }
     var pr = lineProbs(b, line), diff = b.proj - line, hasPush = pr.push > 0.005, lt = esc(vtxt(line, stat));
     h += '<section class="panel"><div class="proj-row"><div><div class="big-label">The model projects ' + esc(label(stat).toLowerCase()) +
-      '</div><div class="proj-num">' + fmt(b.proj) + '</div></div><div class="proj-side"><div class="a">Your number ' + lt +
+      '</div><div class="proj-num" data-n="' + b.proj + '">' + fmt(b.proj) + '</div></div><div class="proj-side"><div class="a">Your number ' + lt +
       '</div><div class="b">' + (Math.abs(diff) < 0.05 ? "Right on it" : fmt(Math.abs(diff)) + (diff > 0 ? " above" : " below") + " your number") +
       "</div></div></div></section>";
-    h += '<section class="panel"><h2>Chance of finishing</h2><div class="two"><div class="pc o"><b>' + chanceTxt(pr.over) +
-      "</b><span>above " + lt + '</span></div><div class="pc"><b>' + chanceTxt(pr.under) + "</b><span>below " + lt + "</span></div></div>" +
+    h += '<section class="panel"><h2>Chance of finishing</h2><div class="two"><div class="pc o"><b' + countAttr(pr.over) + ">" + chanceTxt(pr.over) +
+      "</b><span>above " + lt + '</span></div><div class="pc"><b' + countAttr(pr.under) + ">" + chanceTxt(pr.under) + "</b><span>below " + lt + "</span></div></div>" +
       '<div class="probbar" role="img" aria-label="' + chanceAria(pr.over) + " above, " + chanceAria(pr.under) + ' below">' +
       '<div class="over" style="width:' + (barShare(pr.over) * 100).toFixed(1) + '%"></div>' +
       (hasPush ? '<div class="push" style="width:' + (pr.push * 100).toFixed(1) + '%"></div>' : "") + '<div class="under"></div></div>' +
@@ -1327,7 +1341,7 @@
       '%"></div><div class="mark" style="left:' + pos(b.proj, sc) + '%"></div><div class="linemark" style="left:' + pos(line, sc) + '%"></div></div>' +
       '<div class="scale"><span>' + sc.lo + "</span><span>" + sc.hi + "</span></div>" +
       '<div class="legend"><span><i style="background:var(--accent-soft)"></i>Typical range ' + fmt(b.lo) + " – " + fmt(b.hi) +
-      '</span><span><i style="background:var(--accent)"></i>Projection ' + fmt(b.proj) +
+      '</span><span><i style="background:var(--text)"></i>Projection ' + fmt(b.proj) +
       '</span><span><i style="background:var(--amber)"></i>Your number</span></div></section>';
 
     h += lastGamesPanel(p, stat, line);
@@ -1513,6 +1527,7 @@
       else if (view === "games" || view === "mine" || view === "last") state.back = r.h;
       state.shown = view;
       $("nav").hidden = view === "detail" || view === "check";
+      document.body.classList.toggle("has-nav", !$("nav").hidden);
       $("navLast").hidden = !state.score;
       $("navHome").setAttribute("aria-current", view === "home" ? "page" : "false");
       $("navTonight").setAttribute("aria-current", view === "games" ? "page" : "false");
@@ -1524,12 +1539,46 @@
       else if (view === "last") renderLast();
       else if (view === "mine") renderMine();
       else if (view === "home") renderHome();
-      else renderList();
+      else {
+        renderTabs();
+        renderList();
+        var on = $("gameTabs").querySelector('[aria-pressed="true"]');
+        if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "center" });
+      }
       window.scrollTo(0, key ? (ys[key] || 0) : 0);
       shownKey = key;
+      if (!(key && ys[key])) entrance($(VIEW_EL[view]));
     }
     if (state.data && target === state.day) render();
     else selectDay(target).then(render);
+  }
+  // Screens slide in and numbers count up right after you open them. The 5-minute refresh redraws without motion.
+  var reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  var animTimer = null;
+  function entrance(el) {
+    if (reduceMotion || !el) return;
+    el.classList.remove("anim");
+    void el.offsetWidth;
+    el.classList.add("anim");
+    clearTimeout(animTimer);
+    animTimer = setTimeout(function () { el.classList.remove("anim"); }, 1400);
+    countUp(el);
+  }
+  function countUp(el) {
+    var nodes = [].slice.call(el.querySelectorAll("[data-n]"));
+    if (!nodes.length) return;
+    var t0 = null;
+    function step(ts) {
+      if (t0 === null) t0 = ts;
+      var k = Math.min(1, (ts - t0) / 900), e = 1 - Math.pow(1 - k, 3);
+      nodes.forEach(function (n) {
+        if (!n.isConnected) return;
+        var d = n.dataset.d != null ? +n.dataset.d : 1;
+        n.textContent = (+n.dataset.n * e).toFixed(d) + (n.dataset.s || "");
+      });
+      if (k < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
   }
   function rerender() {
     var r = parseHash();
@@ -1559,6 +1608,13 @@
     });
   }
 
+  function hideLoader() {
+    var l = $("loader");
+    if (!l || l.classList.contains("done")) return;
+    clearInterval(loaderTick);
+    var wait = Math.max(0, loaderMin - (Date.now() - loaderT0));
+    setTimeout(function () { l.classList.add("done"); setTimeout(function () { l.hidden = true; }, 400); }, wait);
+  }
   function start(data) {
     state.slate = data;
     state.slateDate = data.meta.slate_date;
@@ -1602,9 +1658,11 @@
     setInterval(refresh, 5 * 60 * 1000);
     document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
     route();
+    hideLoader();
   }
 
   function fail(msg) {
+    hideLoader();
     $("subline").textContent = "";
     $("cards").innerHTML = "";
     $("listMsg").innerHTML = '<div class="error">' + msg + "</div>";
@@ -1640,6 +1698,20 @@
       .then(function (j) { state.pp = j && j.meta && j.lines && j.meta.slate_date ? j : null; })
       .catch(function () { state.pp = null; });
   }
+
+  // Shot-clock loading screen. Shown at least ~0.7s on the first visit of a session, then only while data loads.
+  var loaderT0 = Date.now(), loaderMin = 0, loaderTick = null;
+  (function () {
+    var first = false;
+    try { first = !sessionStorage.getItem("seenLoader"); sessionStorage.setItem("seenLoader", "1"); } catch (e) { first = false; }
+    loaderMin = first && !reduceMotion ? 700 : 0;
+    var n = 24, clk = $("loaderClock");
+    if (clk && !reduceMotion) loaderTick = setInterval(function () {
+      n = n <= 1 ? 24 : n - 1;
+      clk.textContent = (n < 10 ? "0" : "") + n;
+      clk.classList.toggle("low", n <= 5);
+    }, 100);
+  })();
 
   fetch("slate.json", { cache: "no-cache" })
     .then(function (r) {
