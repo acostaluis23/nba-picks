@@ -11,3 +11,5 @@ site/scorecard.json
 site/results.json
 site/days/
 site/preview.json
+apify_token.txt
+site/props.json

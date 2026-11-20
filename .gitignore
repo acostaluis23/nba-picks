@@ -7,3 +7,15 @@ site/slate.json
 site/injuries.json
 backtest_rows.csv
 results.csv
+apify_token.txt
+site/props.json
+
+apify_token.txt
+site/props.json
+lines-backups/
+*.bak-lines
+*.log
+.venv/
+nba.db
+archive/
+logs/

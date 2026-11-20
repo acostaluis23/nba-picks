@@ -128,6 +128,14 @@ def write_day(slate, injuries_path, db, days_dir):
     day["inj"] = None
     if injuries_path and Path(injuries_path).exists():
         day["inj"] = json.load(open(injuries_path, encoding="utf-8"))
+    # The PrizePicks lines saved by pregame (fetch_lines.py), so any day can be graded against real lines later.
+    lines_file = HERE / "archive" / f"lines-{slate['meta']['slate_date']}.json"
+    day["lines"] = None
+    if lines_file.exists():
+        try:
+            day["lines"] = json.load(open(lines_file, encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - a bad lines file must never stop grading
+            day["lines"] = None
     path = days_dir / f"{slate['meta']['slate_date']}.json"
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(day, fh, ensure_ascii=False, separators=(",", ":"), allow_nan=False)

@@ -19,6 +19,11 @@ if (Test-Path "site\slate.json") {
     Write-Host "Saved archive\injuries-$day.json"
 }
 
+# PrizePicks lines for the Check page and the nightly grade (fetch_lines.py).
+# Optional: if this fails, carry on without lines.
+& $py fetch_lines.py 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { Write-Host "No new PrizePicks lines this time. Carrying on." }
+
 & (Join-Path $root "deploy.ps1") | Out-Host
 Write-Host "=== Done $(Get-Date) ==="
 Stop-Transcript | Out-Null

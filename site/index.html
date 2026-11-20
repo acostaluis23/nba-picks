@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>NBA Projections</title>
+<meta name="description" content="Projected points, rebounds and assists for every player tonight. Type in a number to see how likely it is.">
+<meta name="theme-color" content="#0b0f14">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NBA Projections">
+<meta property="og:title" content="NBA Projections">
+<meta property="og:description" content="Projected points, rebounds and assists for every player tonight. Type in a number to see how likely it is.">
+<meta property="og:url" content="https://acostaluis23.github.io/nba-picks/">
+<meta property="og:image" content="https://acostaluis23.github.io/nba-picks/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="NBA Projections: check a number before tip-off">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NBA Projections">
+<meta name="twitter:description" content="Projected points, rebounds and assists for every player tonight. Type in a number to see how likely it is.">
+<meta name="twitter:image" content="https://acostaluis23.github.io/nba-picks/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -13,11 +28,17 @@
 <body>
 
 <nav class="nav wrap" id="nav" aria-label="Pages" hidden>
-  <a href="#/" id="navTonight">Games</a>
+  <a href="#/" id="navHome">Home</a>
+  <a href="#/games" id="navTonight">Games</a>
   <a href="#/last" id="navLast">Last night</a>
+  <a href="#/mine" id="navMine" hidden>My numbers</a>
 </nav>
 
-<main id="listView" class="wrap">
+<main id="homeView" class="narrow" hidden></main>
+<main id="checkView" class="narrow" hidden></main>
+<main id="mineView" class="narrow" hidden></main>
+
+<main id="listView" class="wrap" hidden>
   <div class="top">
     <div class="title-row">
       <div>
@@ -43,7 +64,13 @@
       </button>
     </div>
 
-    <input class="search" id="search" type="search" placeholder="Search a player" aria-label="Search a player" autocomplete="off">
+    <div class="searchrow">
+      <input class="search" id="search" type="search" placeholder="Search a player" aria-label="Search a player" autocomplete="off">
+      <div class="seg" id="viewSeg" role="group" aria-label="View">
+        <button type="button" data-view="cards" aria-pressed="true">Cards</button>
+        <button type="button" data-view="list" aria-pressed="false">List</button>
+      </div>
+    </div>
   </div>
 
   <div class="scroller" id="statChips" role="group" aria-label="Stat"></div>
@@ -51,6 +78,11 @@
 
   <label class="check" id="outRow" hidden><input type="checkbox" id="showOut"> Show players listed out</label>
   <div id="listNote" class="note" style="padding-top:12px" hidden></div>
+  <p class="lkey" id="listKey" hidden>
+    <span><i class="k-band"></i>Typical range</span>
+    <span><i class="k-tick"></i>Our projection</span>
+    <span><i class="k-dot"></i>Where they finished</span>
+  </p>
   <div class="grid" id="cards"></div>
   <div id="listMsg"></div>
 

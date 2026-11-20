@@ -19,10 +19,9 @@
     TOR: ["#5a1e2a", "#e4e4e4"], UTA: ["#2a2f5a", "#ffe08a"], WAS: ["#1d3a6b", "#ffc2c7"]
   };
 
-  var state = { data: null, slate: null, preview: null, slateDate: "", day: null, days: [], dayCache: {}, liveInj: null, liveRes: null, res: null, finalGames: {}, inj: null, score: null, stat: "pts", game: "all", q: "", cur: false, showOut: false, lines: {} };
+  var state = { data: null, slate: null, preview: null, slateDate: "", day: null, days: [], dayCache: {}, liveInj: null, liveRes: null, res: null, finalGames: {}, inj: null, score: null, stat: "pts", game: "all", q: "", cur: false, showOut: false, lines: {}, view: "cards", back: "", more: false, mine: [], hq: "", pick: null, hnum: "", cstat: "pts", chk: null, shown: "", pp: null };
   var byId = {};
   var injMap = {};
-  var lastY = 0;
 
   // ---------- small helpers ----------
   function $(id) { return document.getElementById(id); }
@@ -181,6 +180,7 @@
     $("gameTabs").innerHTML = tabs.join("");
   }
   function renderList() {
+    $("listKey").hidden = true;
     if (!state.data.games.length) {
       $("cards").innerHTML = "";
       $("listNote").hidden = true;
@@ -200,7 +200,14 @@
     var special = isSpecial(state.stat);
     items.sort(function (a, b) { return special ? b.b.p - a.b.p : b.b.proj - a.b.proj; });
 
-    $("cards").innerHTML = items.map(function (it) {
+    var asList = state.view === "list";
+    $("cards").className = asList ? "rows" : "grid";
+    $("listKey").hidden = !asList || special || !items.length;
+    var scale = asList && !special ? statScale(state.stat) : 0;
+
+    $("cards").innerHTML = asList ? items.map(function (it) {
+      return listRow(it.p, it.b, state.stat, special, scale);
+    }).join("") : items.map(function (it) {
       var p = it.p, b = it.b, big, sub, range;
       if (special) {
         big = pct(b.p);
@@ -219,7 +226,7 @@
         esc(p.team) + "</div></div></div>" +
         "<div><div class=\"big\">" + esc(big) + '</div><div class="big-label">' + esc(sub) + (special ? "" : changeHtml(b)) + "</div></div>" +
         resultHtml(p, state.stat, b) +
-        '<div class="foot"><span class="r1">' + esc(range) + '</span><span class="r2">' +
+        '<div class="foot">' + ppCard(p, state.stat) + '<span class="r1">' + esc(range) + '</span><span class="r2">' +
         esc(matchup(p) + (gameTime(p) ? " · " + gameTime(p) : "")) + "</span></div>" +
         '<div class="badges">' + badges + "</div></a>";
     }).join("");
@@ -235,6 +242,70 @@
     }
     note.hidden = !notes.length;
     note.textContent = notes.join(" ");
+  }
+  // ---------- list view (one row per player, with a range bar) ----------
+  // One scale for the whole day and stat, so bars can be compared from row to row.
+  function statScale(stat) {
+    var max = 0;
+    state.data.players.forEach(function (p) {
+      var b = getBlock(p, stat);
+      if (!b || b.hi == null) return;
+      if (b.hi > max) max = b.hi;
+      var r = state.res && state.res.players[p.id];
+      if (r && r[stat] != null && r[stat] > max) max = r[stat];
+    });
+    return Math.max(1, Math.ceil(max * 1.04));
+  }
+  function barPct(v, scale) { return Math.max(0, Math.min(100, v / scale * 100)).toFixed(1); }
+  function listBadges(p) {
+    var i = injInfo(p), out = "";
+    if (!i) out += '<span class="badge">Status unverified</span>';
+    else if (i.kind !== "ok") out += statusBadge(p);
+    if (p.b2b) out += '<span class="badge">B2B</span>';
+    if (teammatesOut(p).length) out += '<span class="badge">Teammate out</span>';
+    return out;
+  }
+  // The right-hand label and the dot on the bar once the game is final.
+  function listFinal(p, stat, b, special) {
+    var none = { label: "", dot: "", tone: "" };
+    if (!state.res) return none;
+    var r = state.res.players[p.id];
+    if (!r) return state.finalGames[p.game_id] ? { label: '<small>Final</small><b class="in">DNP</b>', dot: "", tone: "" } : none;
+    var v = r[stat];
+    if (v == null) return none;
+    if (special) return { label: '<small>Final</small><b class="' + (v ? "above" : "in") + '">' + (v ? "Yes" : "No") + "</b>", dot: "", tone: "" };
+    var tone = toneOf(v, b);
+    var arrow = tone === "above" ? "▲ " : tone === "below" ? "▼ " : "";
+    return { label: '<small>Final</small><b class="' + tone + '">' + arrow + shown(v) + "</b>", value: v, tone: tone };
+  }
+  function listRow(p, b, stat, special, scale) {
+    var big = special ? pct(b.p) : fmt(b.proj);
+    var fin = listFinal(p, stat, b, special);
+    var tip = timeOf(p).replace(/\s*(ET|EST|EDT)$/i, "");
+    var meta = p.team + " " + matchup(p) + (state.finalGames[p.game_id] ? "" : (tip ? " · " + tip : ""));
+    var mid, label;
+    if (special) {
+      mid = '<span class="lnote">' + esc(recentHits(p, stat)) + "</span>";
+      label = fin.label;
+    } else {
+      var aria = "Typical range " + fmt(b.lo) + " to " + fmt(b.hi) + ", projected " + fmt(b.proj) +
+        (fin.value != null ? ", finished " + shown(fin.value) : "");
+      mid = '<span class="lbar" role="img" aria-label="' + esc(aria) + '">' +
+        '<span class="lband" style="left:' + barPct(b.lo, scale) + "%;width:" + (barPct(b.hi, scale) - barPct(b.lo, scale)).toFixed(1) + '%"></span>' +
+        '<span class="ltick" style="left:' + barPct(b.proj, scale) + '%"></span>' +
+        ppTick(p, stat, scale) +
+        (fin.value != null ? '<span class="ldot ' + fin.tone + '" style="left:' + barPct(fin.value, scale) + '%"></span>' : "") +
+        "</span>";
+      label = fin.label || '<span class="lrange">' + fmt(b.lo) + " – " + fmt(b.hi) + "</span>";
+    }
+    return '<a class="lrow' + (isOut(p) ? " dim" : "") + '" href="' + pHref(p.id, stat) + '">' +
+      '<div class="ltop"><div class="lwho"><span class="lname">' + esc(p.name) + "</span>" + listBadges(p) + "</div>" +
+      '<div class="lproj">' + ppList(p, stat) + (special ? "" : changeHtml(b)) + "<b>" + esc(big) + "</b></div></div>" +
+      '<div class="lmid"><span class="lmeta">' + esc(meta) + "</span>" + mid + '<span class="llab">' + label + "</span></div></a>";
+  }
+  function renderView() {
+    var btns = document.querySelectorAll("#viewSeg [data-view]");
+    for (var i = 0; i < btns.length; i++) btns[i].setAttribute("aria-pressed", btns[i].dataset.view === state.view);
   }
   function recentHits(p, stat) {
     var need = stat === "dd" ? 2 : 3, hits = 0;
@@ -295,8 +366,8 @@
     }).join("");
 
     var html = "";
-    html += '<a class="back" href="' + dayHash(state.day) + '"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Slate</a>';
+    var bk = backInfo(dayHash(state.day), "Games");
+    html += '<a class="back" href="' + esc(bk.href) + '">' + BACK_SVG + esc(bk.label) + "</a>";
     html += '<div class="hero">' + avatar(p, true) + "<div><h1>" + esc(p.name) + '</h1><div class="meta">' +
       esc(p.team + " · " + matchup(p) + (gameTime(p) ? " · " + gameTime(p) : "")) + '</div><div class="badges">' +
       statusBadge(p) + (p.b2b ? '<span class="badge">Back-to-back</span>' : "") +
@@ -342,8 +413,19 @@
         if (isFinite(v)) state.lines[p.id + ":" + stat] = v; else delete state.lines[p.id + ":" + stat];
         store("line:" + p.id + ":" + stat, isFinite(v) ? String(v) : "");
         applyLine(p, stat, block);
+        var slot1 = $("ppSlot");
+        if (slot1) slot1.innerHTML = ppRow(p, stat, isFinite(v) ? v : null, state.day);
       });
       applyLine(p, stat, block);
+      var slot = $("ppSlot");
+      if (slot) {
+        slot.addEventListener("click", function (e) {
+          var pc = e.target.closest("[data-pp]");
+          if (!pc) return;
+          input.value = pc.dataset.pp;
+          input.dispatchEvent(new Event("input"));
+        });
+      }
     }
   }
 
@@ -419,6 +501,7 @@
       '<label for="lineInput">Type a line from PrizePicks or a sportsbook</label>' +
       '<input id="lineInput" type="number" inputmode="decimal" step="0.5" min="0" value="' +
       (saved !== undefined ? saved : "") + '" placeholder="' + fmt(Math.round(b.proj * 2) / 2) + '"></div>' +
+      '<div id="ppSlot">' + ppRow(p, stat, saved !== undefined ? saved : null, state.day) + "</div>" +
       '<div class="probs" id="lineResult"><p class="note">Enter a line to see the model\'s chance of going over or under it.</p></div></section>';
   }
   function applyLine(p, stat, block) {
@@ -432,14 +515,15 @@
     var pr = lineProbs(block, line);
     var diff = block.proj - line;
     var hasPush = pr.push > 0.005;
-    var html = '<div class="probbar"><div class="over" style="width:' + (pr.over * 100) + '%"></div>' +
+    var html = '<div class="probbar"><div class="over" style="width:' + (barShare(pr.over) * 100).toFixed(1) + '%"></div>' +
       (hasPush ? '<div class="push" style="width:' + (pr.push * 100) + '%"></div>' : "") +
       '<div class="under"></div></div>' +
-      '<div class="problabels"><span><i class="o"></i>Over <b>' + pct(pr.over) + "</b></span>" +
+      '<div class="problabels"><span><i class="o"></i>Over <b>' + chanceTxt(pr.over) + "</b></span>" +
       (hasPush ? '<span><i class="p"></i>Push <b>' + pct(pr.push) + "</b></span>" : "") +
-      '<span><i class="u"></i>Under <b>' + pct(pr.under) + "</b></span></div>" +
+      '<span><i class="u"></i>Under <b>' + chanceTxt(pr.under) + "</b></span></div>" +
       '<p class="note">The model projects ' + fmt(block.proj) + ", which is " + (diff >= 0 ? "+" : "") + fmt(diff) +
-      " vs the line." + (hasPush ? " A push means landing exactly on the line." : "") + "</p>";
+      " vs the line." + (hasPush ? " A push means landing exactly on the line." : "") + "</p>" +
+      (/^\d+(\.\d+)?$/.test(String(line)) ? '<a class="xlink" href="' + cHref(p.id, stat, line, state.day) + '">See the full check and save this number</a>' : "");
     res.innerHTML = html;
     var bar = $("rangeBar"), sc = { lo: +bar.dataset.lo, hi: +bar.dataset.hi };
     if (line < sc.lo || line > sc.hi) {
@@ -689,6 +773,7 @@
   // ---------- days, results and refreshing ----------
   var detailRe = /^#\/p\/(\d+)\/(\w+)(?:\/(\d{4}-\d{2}-\d{2}))?/;
   var dayRe = /^#\/d\/(\d{4}-\d{2}-\d{2})/;
+  var checkRe = /^#\/c\/(\d+)\/(\w+)(?:\/(\d+(?:\.\d+)?))?(?:\/(\d{4}-\d{2}-\d{2}))?/;
 
   function loadJSON(url) {
     return fetch(url, { cache: "no-cache" }).then(function (r) {
@@ -718,7 +803,7 @@
   // The next-day preview only counts while it is later than the slate that is live.
   function previewOK() { return !!state.preview && state.preview.meta.slate_date > state.slateDate; }
   function hasDayFile(d) { return state.days.indexOf(d) !== -1; }
-  function dayHash(d) { return !d || d === state.slateDate ? "#/" : "#/d/" + d; }
+  function dayHash(d) { return !d || d === state.slateDate ? "#/games" : "#/d/" + d; }
   function pHref(id, stat) {
     return "#/p/" + id + "/" + stat + (state.day && state.day !== state.slateDate ? "/" + state.day : "");
   }
@@ -843,6 +928,557 @@
       '<p class="note">' + where + "Played " + fmt(r.m, 0) + " min (projected " + fmt(minutesOf(p), 0) + ").</p></section>";
   }
 
+  // ---------- home, check a number, my numbers ----------
+  var CHECK_MAIN = ["pts", "reb", "ast", "pra"];
+  var CHECK_MORE = ["fg3m", "pr", "pa", "ra", "stl", "blk", "tov", "fantasy"];
+  var SHORT = { pts: "PTS", reb: "REB", ast: "AST", pra: "PRA", fg3m: "3PM", pr: "P+R", pa: "P+A", ra: "R+A",
+    stl: "STL", blk: "BLK", tov: "TO", fantasy: "FANTASY" };
+  var BACK_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
+  var MAX_MINE = 40;
+
+  // The day that Home, Check and My numbers talk about: the live slate, or the next day's preview once the live slate is over.
+  function homeDate() {
+    var r = liveRes();
+    return previewOK() && r && r.meta.all_final ? state.preview.meta.slate_date : state.slateDate;
+  }
+  // Where the players for a saved number live. Only the live slate and the preview count.
+  function sourceFor(date) {
+    if (date === state.slateDate) return { data: state.slate, res: liveRes() };
+    if (previewOK() && date === state.preview.meta.slate_date) return { data: state.preview, res: null };
+    return null;
+  }
+  function playerIn(data, id) {
+    if (!data._ids) { data._ids = {}; data.players.forEach(function (p) { data._ids[p.id] = p; }); }
+    return data._ids[id] || null;
+  }
+  function tipIn(src, p) {
+    if (src.res && src.res.meta.games_final.indexOf(p.game_id) !== -1) return "Final";
+    var t = "";
+    src.data.games.forEach(function (g) { if (g.game_id === p.game_id) t = g.time || ""; });
+    return t.replace(/\s*(ET|EST|EDT)$/i, "");
+  }
+  function curSrc() { return { data: state.data, res: state.res }; }
+  function checkStats(p) {
+    return CHECK_MAIN.concat(CHECK_MORE).filter(function (k) {
+      return p ? !!p.stats[k] : !!state.data.meta.stat_labels[k];
+    });
+  }
+  function blockOf(p, stat) { return getBlock(p, stat) || p.stats[stat]; }
+  function parseLine(s) {
+    var v = parseFloat(String(s).replace(",", "."));
+    return isFinite(v) && v >= 0 && v <= 300 ? Math.round(v * 100) / 100 : null;
+  }
+  function vtxt(v, stat) { return stat === "fantasy" ? fmt(v) : (Number.isInteger(v) ? String(v) : fmt(v)); }
+  // The model is rarely sure, so anything past 75% is shown as 75%+ (and the other side as <25%).
+  function chanceTxt(x) { return x > 0.75 ? "75%+" : x < 0.25 ? "&lt;25%" : pct(x); }
+  function chanceAria(x) { return x > 0.75 ? "over 75%" : x < 0.25 ? "under 25%" : pct(x); }
+  function barShare(x) { return Math.min(0.75, Math.max(0.25, x)); }
+  function cHref(id, stat, line, date) {
+    return "#/c/" + id + "/" + stat + (line != null ? "/" + line : "") + (date && date !== homeDate() ? "/" + date : "");
+  }
+  // ----- PrizePicks lines (props.json, saved by fetch_lines.py) -----
+  // Only used when the saved lines are for the same day as this page. Without them nothing changes.
+  function ppLine(p, stat, date) {
+    var pp = state.pp;
+    if (!pp || !p || pp.meta.slate_date !== date) return null;
+    var l = pp.lines[String(p.id)];
+    return l && typeof l[stat] === "number" ? l[stat] : null;
+  }
+  function ppTime() {
+    var d = new Date(state.pp.meta.fetched_at);
+    return isNaN(d.getTime()) ? "" : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+  // PrizePicks line on the Games cards and list rows (same stat as the chip that is selected).
+  function ppCard(p, stat) {
+    var v = ppLine(p, stat, state.data.meta.slate_date);
+    return v === null ? "" : '<span class="rpp"><i>PrizePicks</i><b>' + esc(vtxt(v, stat)) + "</b></span>";
+  }
+  function ppList(p, stat) {
+    var v = ppLine(p, stat, state.data.meta.slate_date);
+    return v === null ? "" : '<span class="lpp"><small>PrizePicks</small><b>' + esc(vtxt(v, stat)) + "</b></span>";
+  }
+  function ppTick(p, stat, scale) {
+    var v = ppLine(p, stat, state.data.meta.slate_date);
+    return v === null ? "" : '<span class="lppt" style="left:' + barPct(v, scale) + '%"></span>';
+  }
+  function ppRow(p, stat, line, date) {
+    var v = ppLine(p, stat, date);
+    if (v === null) return "";
+    var same = line !== null && isFinite(line) && Math.abs(line - v) < 0.001;
+    var t = ppTime();
+    return '<div class="ppl"><span class="ppk">PrizePicks</span>' +
+      (same ? '<span class="ppv">' + esc(vtxt(v, stat)) + " <i>matches your number</i></span>"
+        : '<button type="button" class="ppchip" data-pp="' + v + '">Use ' + esc(vtxt(v, stat)) + "</button>") +
+      (t ? '<span class="ppt">as of ' + esc(t) + "</span>" : "") + "</div>";
+  }
+  function goCheck(id, stat, line, date) {
+    var h = cHref(id, stat, line, date);
+    if (location.hash === h) route(); else location.hash = h;
+  }
+  function backInfo(fbHref, fbLabel) {
+    var b = state.back;
+    if (!b) return { href: fbHref, label: fbLabel };
+    return { href: b, label: b === "#/" ? "Home" : b === "#/mine" ? "My numbers" : b === "#/last" ? "Last night" : "Games" };
+  }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
+  // ----- saved numbers (kept on this phone only) -----
+  function loadMine() {
+    var a;
+    try { a = JSON.parse(load("myNumbers") || "[]"); } catch (e) { a = []; }
+    if (!Array.isArray(a)) a = [];
+    state.mine = a.filter(function (e) {
+      return e && typeof e.id === "number" && typeof e.stat === "string" && typeof e.line === "number" &&
+        isFinite(e.line) && typeof e.date === "string";
+    }).slice(0, MAX_MINE);
+    pruneMine();
+  }
+  function saveMine() { store("myNumbers", JSON.stringify(state.mine)); updateNav(); }
+  // Numbers are for one day's games, so they go away once that day is no longer the live slate or the preview.
+  function pruneMine() {
+    var n = state.mine.length;
+    state.mine = state.mine.filter(function (e) { return !!sourceFor(e.date); });
+    if (state.mine.length !== n) saveMine();
+  }
+  function mineIndex(e) {
+    for (var i = 0; i < state.mine.length; i++) {
+      var x = state.mine[i];
+      if (x.id === e.id && x.stat === e.stat && x.line === e.line && x.date === e.date) return i;
+    }
+    return -1;
+  }
+  function updateNav() { $("navMine").hidden = !state.mine.length; }
+
+  // ----- Home -----
+  function firstTip(games) {
+    var best = null;
+    games.forEach(function (g) { if (g.start && (!best || g.start < best.start)) best = g; });
+    return best ? best.time : "";
+  }
+  function suggestHtml(q) {
+    var s = plain(q.trim());
+    if (!s) return "";
+    var hits = [];
+    state.data.players.forEach(function (p) {
+      var n = plain(p.name), i = n.indexOf(s);
+      if (i === -1 || !checkStats(p).length) return;
+      var starts = i === 0 || /[\s\-'.]/.test(n.charAt(i - 1));
+      hits.push({ p: p, rank: starts ? 0 : 1, v: p.stats.pts ? p.stats.pts.proj : 0 });
+    });
+    if (!hits.length) return '<p class="cap" style="padding:10px 14px">No player on this slate matches.</p>';
+    hits.sort(function (a, b) { return a.rank - b.rank || b.v - a.v; });
+    return hits.slice(0, 6).map(function (h) {
+      var p = h.p, tip = tipIn(curSrc(), p);
+      return '<button type="button" data-pid="' + p.id + '"><span class="st"><span class="sn">' + esc(p.name) +
+        '</span><span class="ss">' + esc(p.team + " " + matchup(p) + (tip ? " · " + tip : "")) + "</span></span>" +
+        (isOut(p) ? '<span class="badge out">OUT</span>' : "") + "</button>";
+    }).join("");
+  }
+  function chipsInner(keys, sel) {
+    var more = keys.filter(function (k) { return CHECK_MAIN.indexOf(k) === -1; });
+    var open = state.more || more.indexOf(sel) !== -1;
+    var list = open ? keys : keys.filter(function (k) { return CHECK_MAIN.indexOf(k) !== -1; });
+    var h = list.map(function (k) {
+      return '<button type="button" class="cchip" data-cstat="' + k + '" aria-pressed="' + (k === sel) + '" title="' +
+        esc(label(k)) + '">' + esc(SHORT[k] || label(k)) + "</button>";
+    }).join("");
+    if (!open && more.length) h += '<button type="button" class="cchip cmore" data-more="1">More</button>';
+    return h;
+  }
+  function homeForm() {
+    var keys = checkStats(null);
+    if (keys.indexOf(state.cstat) === -1) state.cstat = keys[0] || "pts";
+    return '<form class="ckform" id="hkForm" novalidate aria-label="Check a number">' +
+      '<div class="fld"><label class="flbl" for="hkPlayer">Player</label>' +
+      '<input class="cin" id="hkPlayer" type="search" placeholder="Search a player" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(state.hq) + '">' +
+      '<div class="sugg" id="hkSugg" hidden></div></div>' +
+      '<div class="fld"><span class="flbl">Stat</span><div class="cchips" id="hkChips" role="group" aria-label="Stat">' + chipsInner(keys, state.cstat) + "</div></div>" +
+      '<div class="fld"><label class="flbl" for="hkNum">Number</label><div class="ckrow">' +
+      '<input class="cin num" id="hkNum" type="text" inputmode="decimal" placeholder="e.g. 24.5" autocomplete="off" value="' + esc(state.hnum) + '">' +
+      '<button class="ckgo" type="submit">Check</button></div></div>' +
+      '<p class="cerr" id="hkErr" role="alert" hidden></p>' +
+      '<p class="cap">Find the number in your app, then type it here. We show how often a player finishes above or below it.</p></form>';
+  }
+  function homeGames(word) {
+    var g = state.data.games, tip = firstTip(g);
+    return '<section class="hsec"><div class="hsh"><h2>' + esc(word) + "</h2><span>" + plural(g.length, "game", "games") +
+      (tip ? " · first tip " + esc(tip) : "") + '</span></div><div class="gms">' + g.map(function (x) {
+        return '<button type="button" class="gm" data-game="' + esc(x.game_id) + '"><b>' + esc(x.away + " @ " + x.home) + "</b><i>" +
+          esc(state.finalGames[x.game_id] ? "Final" : (x.time || "").replace(/\s*(ET|EST|EDT)$/i, "")) + "</i></button>";
+      }).join("") + "</div></section>";
+  }
+  function homeTop() {
+    var rows = state.data.players.filter(function (p) { return !isOut(p) && getBlock(p, "pts"); })
+      .sort(function (a, b) { return getBlock(b, "pts").proj - getBlock(a, "pts").proj; }).slice(0, 5);
+    if (!rows.length) return "";
+    return '<section class="hsec"><div class="hsh"><h2>Top projections</h2><span>Points</span></div><div class="hbox">' +
+      rows.map(function (p, i) {
+        var b = getBlock(p, "pts"), tip = tipIn(curSrc(), p);
+        return '<a class="hp" href="' + pHref(p.id, "pts") + '"><span class="rk">' + (i + 1) + '</span><div><div class="pn">' + esc(p.name) +
+          '</div><div class="ps">' + esc(p.team + " " + matchup(p) + (tip ? " · " + tip : "")) + '</div></div><div class="pv"><b>' +
+          fmt(b.proj) + "</b><span>" + fmt(b.lo) + " – " + fmt(b.hi) + "</span></div></a>";
+      }).join("") + '<a class="hmore" href="' + dayHash(state.day) + '">See all players</a></div></section>';
+  }
+  function homeChanges() {
+    var rows = [];
+    state.data.players.forEach(function (p) {
+      var b = getBlock(p, "pts");
+      if (isOut(p) || p.avg_min < 20 || !b) return;
+      var d = movedBy(b);
+      if (d) rows.push({ p: p, b: b, d: d });
+    });
+    rows.sort(function (a, b) { return Math.abs(b.d) - Math.abs(a.d); });
+    rows = rows.slice(0, 4);
+    if (!rows.length) return "";
+    return '<section class="hsec"><div class="hsh"><h2>Biggest changes</h2><span>Points, since the last update</span></div><div class="hbox">' +
+      rows.map(function (x) {
+        return '<a class="hp nr" href="' + pHref(x.p.id, "pts") + '"><div><div class="pn">' + esc(x.p.name) + '</div><div class="ps">' +
+          esc(x.p.team) + '</div></div><div class="mvr"><b>' + fmt(x.b.proj) + "</b>" + changeHtml(x.b) + "</div></a>";
+      }).join("") + "</div></section>";
+  }
+  function homeOut(word) {
+    if (!state.inj) return "";
+    var outs = state.data.players.filter(function (p) { return isOut(p) && p.avg_min >= 20; })
+      .sort(function (a, b) { return b.avg_min - a.avg_min; });
+    if (!outs.length) return "";
+    var rel = /^(Tonight|Tomorrow|Today)$/.test(word);
+    return '<section class="hsec"><div class="hsh"><h2>' + (rel ? "Out " + esc(word.toLowerCase()) : "Listed out") +
+      "</h2><span>From ESPN's injury report</span></div><div class=\"outs\">" + outs.slice(0, 10).map(function (p) {
+        return '<a class="ot" href="' + pHref(p.id, "pts") + '">' + esc(p.name) + " <i>" + esc(p.team) + "</i><em>OUT</em></a>";
+      }).join("") + "</div>" + (outs.length > 10 ? '<p class="note" style="margin-top:10px">+ ' + (outs.length - 10) +
+        " more rotation players are listed out.</p>" : "") + "</section>";
+  }
+  function homeLast() {
+    var s = state.score;
+    if (!s) return "";
+    var yd = s.meta.slate_date === addDays(isoOf(new Date()), -1);
+    return '<section class="hsec"><div class="hsh"><h2>' + (yd ? "How we did last night" : "How we did") + "</h2><span>" +
+      esc(dayLabel(s.meta.slate_date)) + '</span></div><div class="panel hln"><div class="acctop"><b>Did players land in our range?</b><span>' +
+      s.meta.players_graded + ' players</span></div>' + s.accuracy.slice(0, 3).map(function (a) {
+        return '<div class="accrow"><div class="acctop"><b>' + esc(a.label) + "</b><span>" + pct(a.inside50) +
+          " inside the range</span></div>" + hitBar(a.inside50, 0.5) + "</div>";
+      }).join("") + '<p class="cap">The white line is the goal: about half of players should finish inside their range.</p></div>' +
+      '<a class="btn full" href="#/last">See the full report</a></section>';
+  }
+  function renderHome() {
+    var d = state.data, word = dayWord(d.meta.slate_date);
+    var poss = word === "Tonight" ? "tonight's" : word === "Tomorrow" ? "tomorrow's" : word === "Today" ? "today's" : "this";
+    var h = '<section class="hhero"><h1>Check a number before tip-off</h1><p>Projections for every player on ' + poss +
+      " slate, built from box-score history. Type in a number from your app and see how likely it is.</p></section>";
+    if (!d.games.length) {
+      h += '<p class="empty">No games scheduled for ' + esc(dayLabel(d.meta.slate_date)) + ".</p>";
+    } else {
+      h += homeForm() + homeGames(word) + homeTop() + homeChanges() + homeOut(word);
+    }
+    h += homeLast();
+    h += '<p class="note footer">Projections are estimates from box-score history, not betting advice. Injury status comes from ESPN and ' +
+      "can change before tip-off, so confirm who is playing.</p>";
+    $("homeView").innerHTML = h;
+    if (state.hq && !state.pick) showSugg();
+  }
+  function showSugg() {
+    var box = $("hkSugg");
+    if (!box) return;
+    var html = state.pick ? "" : suggestHtml(state.hq);
+    box.innerHTML = html;
+    box.hidden = !html;
+  }
+  function homeFail(msg, focusId) {
+    var e = $("hkErr");
+    e.textContent = msg; e.hidden = false;
+    $(focusId).focus();
+  }
+  function pickPlayer(id) {
+    var p = byId[id];
+    if (!p) return;
+    state.pick = id; state.hq = p.name;
+    $("hkPlayer").value = p.name;
+    showSugg();
+    $("hkErr").hidden = true;
+    $("hkNum").focus();
+  }
+  function submitHome() {
+    state.hnum = $("hkNum").value;
+    var p = state.pick ? byId[state.pick] : null;
+    if (!p) {
+      var q = plain(state.hq.trim()), same = [], part = [];
+      if (q) state.data.players.forEach(function (x) {
+        var n = plain(x.name);
+        if (n === q) same.push(x); else if (n.indexOf(q) !== -1) part.push(x);
+      });
+      p = same.length === 1 ? same[0] : (!same.length && part.length === 1 ? part[0] : null);
+    }
+    if (!p) return homeFail("Pick a player from the list.", "hkPlayer");
+    var line = parseLine(state.hnum);
+    if (line === null) return homeFail("Type the number from your app, like 24.5.", "hkNum");
+    var stat = p.stats[state.cstat] ? state.cstat : (p.stats.pts ? "pts" : checkStats(p)[0]);
+    if (!stat) return homeFail("There is no projection for " + p.name + " yet.", "hkPlayer");
+    state.hq = ""; state.pick = null; state.hnum = "";
+    goCheck(p.id, stat, line, state.day);
+  }
+  function wireHome() {
+    var v = $("homeView");
+    v.addEventListener("input", function (e) {
+      if (e.target.id === "hkPlayer") {
+        state.hq = e.target.value; state.pick = null;
+        $("hkErr").hidden = true;
+        showSugg();
+      } else if (e.target.id === "hkNum") {
+        state.hnum = e.target.value;
+        $("hkErr").hidden = true;
+      }
+    });
+    v.addEventListener("click", function (e) {
+      var s = e.target.closest("[data-pid]");
+      if (s) { pickPlayer(+s.dataset.pid); return; }
+      var c = e.target.closest("[data-cstat]");
+      if (c) { state.cstat = c.dataset.cstat; $("hkChips").innerHTML = chipsInner(checkStats(null), state.cstat); return; }
+      if (e.target.closest("[data-more]")) {
+        state.more = true;
+        $("hkChips").innerHTML = chipsInner(checkStats(null), state.cstat);
+        return;
+      }
+      var g = e.target.closest("[data-game]");
+      if (g) { state.game = g.dataset.game; location.hash = dayHash(state.day); }
+    });
+    v.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" || e.target.id !== "hkPlayer") return;
+      e.preventDefault();
+      if (state.pick) { $("hkNum").focus(); return; }
+      var first = $("hkSugg").querySelector("[data-pid]");
+      if (first) pickPlayer(+first.dataset.pid);
+    });
+    v.addEventListener("submit", function (e) { e.preventDefault(); submitHome(); });
+  }
+
+  // ----- Check a number -----
+  function lastGamesPanel(p, stat, line) {
+    var rows = p.recent.slice(0, 5).filter(function (g) { return g.s && g.s[stat] != null; });
+    if (!rows.length) return "";
+    var max = line, above = 0, tie = 0;
+    rows.forEach(function (g) { max = Math.max(max, g.s[stat]); });
+    max = Math.max(max * 1.15, 1);
+    var html = '<section class="panel lk"><h2>Last ' + rows.length + " games against " + esc(vtxt(line, stat)) + "</h2><div>";
+    rows.forEach(function (g) {
+      var v = g.s[stat];
+      if (v > line) above++; else if (v === line) tie++;
+      html += '<div class="gamerow"><div class="who2"><b>' + esc((g.home ? "vs " : "@ ") + g.opp) + "</b><span>" + esc(shortDate(g.date)) +
+        '</span></div><div class="track"><div class="fill' + (v > line ? " hi" : "") + '" style="width:' + (v / max * 100).toFixed(1) +
+        '%"></div><div class="tick" style="left:' + (line / max * 100).toFixed(1) + '%"></div></div><span class="val">' +
+        esc(vtxt(v, stat)) + "</span></div>";
+    });
+    return html + '</div><p class="note">Above ' + esc(vtxt(line, stat)) + " in " + above + " of the last " + rows.length + "." +
+      (tie ? " Landed exactly on it in " + tie + "." : "") + " The orange line is your number.</p></section>";
+  }
+  function paintSave() {
+    var c = state.chk, btn = $("ckSave");
+    if (!c || !btn) return;
+    var saved = mineIndex(c.entry) !== -1;
+    btn.textContent = saved ? "Remove from My numbers" : "Add to My numbers";
+    $("ckSaveNote").innerHTML = saved ? 'Saved on this phone. <a href="#/mine">See My numbers</a>' : "";
+  }
+  function renderCheck(mc) {
+    var v = $("checkView"), id = +mc[1], stat = mc[2], line = mc[3] != null ? parseFloat(mc[3]) : null;
+    var p = byId[id], bk = backInfo("#/", "Home");
+    var back = '<a class="back" href="' + esc(bk.href) + '">' + BACK_SVG + esc(bk.label) + "</a>";
+    var keys = p ? checkStats(p) : [];
+    if (p && (isSpecial(stat) || !p.stats[stat])) stat = p.stats.pts ? "pts" : keys[0];
+    if (!p || !stat || !p.stats[stat]) {
+      state.chk = null;
+      v.innerHTML = back + '<p class="empty">That player isn\'t on the slate for ' + esc(dayLabel(state.day)) + ".</p>";
+      return;
+    }
+    if (keys.indexOf(stat) === -1) keys.push(stat);
+    var b = blockOf(p, stat), tip = gameTime(p);
+    var h = back + '<div class="hero">' + avatar(p, true) + "<div><h1>" + esc(p.name) + '</h1><div class="meta">' +
+      esc(p.team + " · " + matchup(p) + (tip ? " · " + tip : "")) + '</div><div class="badges">' + statusBadge(p) +
+      (p.b2b ? '<span class="badge">Back-to-back</span>' : "") + "</div></div></div>";
+    h += injuryPanel(p);
+    h += '<form class="ckform" id="ckForm" novalidate aria-label="Your number"><div class="cchips" id="ckChips" role="group" aria-label="Stat">' +
+      chipsInner(keys, stat) + '</div><div class="ckrow"><input class="cin num" id="ckNum" type="text" inputmode="decimal" autocomplete="off" ' +
+      'placeholder="Your number" aria-label="Your number" value="' + (line != null && isFinite(line) ? esc(line) : "") + '">' +
+      '<button class="ckgo" type="submit">Check</button></div><p class="cerr" id="ckErr" role="alert" hidden></p></form>';
+    h += ppRow(p, stat, line, state.day);
+
+    state.chk = { id: id, stat: stat, line: line, keys: keys, date: state.day, entry: null };
+    if (line == null || !isFinite(line)) {
+      h += '<p class="note" style="margin-top:14px">Type the number from your app, then tap Check to see how likely it is.</p>';
+      v.innerHTML = h;
+      return;
+    }
+    var pr = lineProbs(b, line), diff = b.proj - line, hasPush = pr.push > 0.005, lt = esc(vtxt(line, stat));
+    h += '<section class="panel"><div class="proj-row"><div><div class="big-label">The model projects ' + esc(label(stat).toLowerCase()) +
+      '</div><div class="proj-num">' + fmt(b.proj) + '</div></div><div class="proj-side"><div class="a">Your number ' + lt +
+      '</div><div class="b">' + (Math.abs(diff) < 0.05 ? "Right on it" : fmt(Math.abs(diff)) + (diff > 0 ? " above" : " below") + " your number") +
+      "</div></div></div></section>";
+    h += '<section class="panel"><h2>Chance of finishing</h2><div class="two"><div class="pc o"><b>' + chanceTxt(pr.over) +
+      "</b><span>above " + lt + '</span></div><div class="pc"><b>' + chanceTxt(pr.under) + "</b><span>below " + lt + "</span></div></div>" +
+      '<div class="probbar" role="img" aria-label="' + chanceAria(pr.over) + " above, " + chanceAria(pr.under) + ' below">' +
+      '<div class="over" style="width:' + (barShare(pr.over) * 100).toFixed(1) + '%"></div>' +
+      (hasPush ? '<div class="push" style="width:' + (pr.push * 100).toFixed(1) + '%"></div>' : "") + '<div class="under"></div></div>' +
+      (hasPush ? '<p class="note">Landing exactly on ' + lt + " is about " + pct(pr.push) + ", so the two sides do not add up to 100%.</p>" : "") +
+      "</section>";
+
+    var sc = rangeScale(b, line);
+    h += '<section class="panel"><h2>Where your number sits</h2><div class="rangebar" role="img" aria-label="Typical range ' + fmt(b.lo) +
+      " to " + fmt(b.hi) + ", projection " + fmt(b.proj) + ", your number " + lt + '">' +
+      '<div class="rail"></div><div class="span" style="left:' + pos(b.lo, sc) + "%;width:" + (pos(b.hi, sc) - pos(b.lo, sc)) +
+      '%"></div><div class="mark" style="left:' + pos(b.proj, sc) + '%"></div><div class="linemark" style="left:' + pos(line, sc) + '%"></div></div>' +
+      '<div class="scale"><span>' + sc.lo + "</span><span>" + sc.hi + "</span></div>" +
+      '<div class="legend"><span><i style="background:var(--accent-soft)"></i>Typical range ' + fmt(b.lo) + " – " + fmt(b.hi) +
+      '</span><span><i style="background:var(--accent)"></i>Projection ' + fmt(b.proj) +
+      '</span><span><i style="background:var(--amber)"></i>Your number</span></div></section>';
+
+    h += lastGamesPanel(p, stat, line);
+
+    var entry = { id: id, stat: stat, line: line, date: state.day, name: p.name, team: p.team };
+    state.chk.entry = entry;
+    if (sourceFor(state.day)) {
+      h += '<div class="acts"><button type="button" class="btn p" id="ckSave">Add to My numbers</button>' +
+        '<a class="btn" href="#/">Check another</a></div><p class="note" id="ckSaveNote" role="status" style="margin-top:10px"></p>';
+    } else {
+      h += '<div class="acts"><a class="btn" href="#/">Check another</a></div>';
+    }
+    h += '<p class="note" style="margin-top:14px">Chances are estimates from box-score history and the matchup, not betting advice.</p>';
+    v.innerHTML = h;
+    paintSave();
+  }
+  function wireCheck() {
+    var v = $("checkView");
+    v.addEventListener("click", function (e) {
+      var c = state.chk;
+      if (!c) return;
+      var pc = e.target.closest("[data-pp]");
+      if (pc) { goCheck(c.id, c.stat, parseFloat(pc.dataset.pp), c.date); return; }
+      var s = e.target.closest("[data-cstat]");
+      if (s) {
+        var typed = parseLine($("ckNum").value);
+        goCheck(c.id, s.dataset.cstat, typed !== null ? typed : null, c.date);
+        return;
+      }
+      if (e.target.closest("[data-more]")) {
+        state.more = true;
+        $("ckChips").innerHTML = chipsInner(c.keys, c.stat);
+        return;
+      }
+      if (e.target.closest("#ckSave")) {
+        var i = mineIndex(c.entry);
+        if (i === -1) {
+          if (state.mine.length >= MAX_MINE) {
+            $("ckSaveNote").textContent = "You have " + MAX_MINE + " numbers saved. Remove one in My numbers first.";
+            return;
+          }
+          state.mine.unshift(c.entry);
+        } else {
+          state.mine.splice(i, 1);
+        }
+        saveMine();
+        paintSave();
+      }
+    });
+    v.addEventListener("input", function (e) { if (e.target.id === "ckNum") $("ckErr").hidden = true; });
+    v.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var c = state.chk;
+      if (!c) return;
+      var line = parseLine($("ckNum").value);
+      if (line === null) {
+        $("ckErr").textContent = "Type the number from your app, like 24.5.";
+        $("ckErr").hidden = false;
+        $("ckNum").focus();
+        return;
+      }
+      goCheck(c.id, c.stat, line, c.date);
+    });
+  }
+
+  // ----- My numbers -----
+  function evalEntry(e, i) {
+    var src = sourceFor(e.date), p = src ? playerIn(src.data, e.id) : null;
+    var b = p ? blockOf(p, e.stat) : null;
+    return { i: i, e: e, src: src, p: p, b: b, pr: b ? lineProbs(b, e.line) : null };
+  }
+  function mineFinal(x) {
+    if (!x.p || !x.src || !x.src.res) return "";
+    var r = x.src.res.players[x.p.id];
+    if (!r) return x.src.res.meta.games_final.indexOf(x.p.game_id) !== -1 ? '<p class="mfin">Did not play</p>' : "";
+    var v = r[x.e.stat];
+    if (v == null) return "";
+    return '<p class="mfin">Final <b>' + esc(shown(v)) + "</b> · " + (v > x.e.line ? "above " : v < x.e.line ? "below " : "exactly on ") +
+      esc(vtxt(x.e.line, x.e.stat)) + "</p>";
+  }
+  function renderMine() {
+    var items = state.mine.map(evalEntry).filter(function (x) { return !!x.src; });
+    items.sort(function (a, b) {
+      if (!a.pr !== !b.pr) return a.pr ? -1 : 1;
+      if (!a.pr) return 0;
+      return Math.max(b.pr.over, b.pr.under) - Math.max(a.pr.over, a.pr.under);
+    });
+    var up = 0, down = 0;
+    items.forEach(function (x) { if (x.pr) { if (x.pr.over >= x.pr.under) up++; else down++; } });
+    var h = '<div class="top" style="padding-top:8px"><div><h1 class="title">My numbers</h1><p class="sub">' +
+      (items.length ? plural(items.length, "number", "numbers") + " checked · " : "") + "saved on this phone only</p></div></div>";
+    if (!items.length) {
+      h += '<div class="mempty"><p>No numbers yet.</p><p class="cap">Check a number, then tap Add to My numbers to keep it here. ' +
+        'They clear when the day\'s games are over.</p><a class="btn p full" href="#/">Check a number</a></div>';
+      $("mineView").innerHTML = h;
+      return;
+    }
+    h += '<div class="msum"><div class="mmini"><b>' + up + "</b><span>lean above the number</span></div>" +
+      '<div class="mmini"><b>' + down + "</b><span>lean below the number</span></div></div>" +
+      '<div class="msort">Sorted by how sure the model is</div>';
+    items.forEach(function (x) {
+      var e = x.e, nm = esc(e.name), ln = esc(label(e.stat) + " " + vtxt(e.line, e.stat));
+      var sub = x.p ? esc(x.p.team + " " + matchup(x.p)) + " · " + esc(tipIn(x.src, x.p)) : esc(e.team) + " · not on the slate";
+      var rm = '<button type="button" class="mrm" data-rm="' + x.i + '" aria-label="Remove ' + nm + " " + esc(label(e.stat).toLowerCase()) + " " +
+        esc(vtxt(e.line, e.stat)) + '"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+      h += '<article class="mitem' + (x.pr ? "" : " dim") + '"><div class="mtop"><a class="mhead" href="' + cHref(e.id, e.stat, e.line, e.date) +
+        '"><div class="mnm">' + nm + '</div><div class="mln"><b>' + ln + "</b> · " + sub + "</div></a>" + rm + "</div>";
+      if (x.pr) {
+        var lead = x.pr.over >= x.pr.under;
+        h += '<div class="mbar" role="img" aria-label="' + chanceAria(x.pr.over) + " above, " + chanceAria(x.pr.under) + ' below">' +
+          '<i style="width:' + (barShare(x.pr.over) * 100).toFixed(1) + '%"></i></div>' +
+          '<div class="mpl"><span>Above ' + (lead ? "<b>" : "") + chanceTxt(x.pr.over) + (lead ? "</b>" : "") + '</span><span class="mmod">Model <b>' + fmt(x.b.proj) + '</b></span><span>Below ' +
+          (lead ? "" : "<b>") + chanceTxt(x.pr.under) + (lead ? "" : "</b>") + "</span></div>" + mineFinal(x);
+      }
+      h += "</article>";
+    });
+    h += '<div class="macts"><a class="btn p" href="#/">Check another</a><button type="button" class="btn" id="mineClear">Clear all</button></div>' +
+      '<p class="note" style="margin-top:14px">Chances over 75% show as 75%+, because the model is rarely that sure. ' +
+      "Estimates from box-score history, not betting advice.</p>";
+    $("mineView").innerHTML = h;
+  }
+  var clearTimer = null;
+  function wireMine() {
+    $("mineView").addEventListener("click", function (e) {
+      var r = e.target.closest("[data-rm]");
+      if (r) {
+        state.mine.splice(+r.dataset.rm, 1);
+        saveMine();
+        renderMine();
+        return;
+      }
+      var c = e.target.closest("#mineClear");
+      if (!c) return;
+      if (c.dataset.sure === "1") {
+        clearTimeout(clearTimer);
+        state.mine = [];
+        saveMine();
+        renderMine();
+        return;
+      }
+      c.dataset.sure = "1";
+      c.textContent = "Tap again to clear";
+      clearTimeout(clearTimer);
+      clearTimer = setTimeout(function () {
+        var b = $("mineClear");
+        if (b) { b.dataset.sure = ""; b.textContent = "Clear all"; }
+      }, 4000);
+    });
+  }
+
   // ---------- wiring ----------
   function toggleCur() {
     state.cur = !state.cur;
@@ -850,50 +1486,64 @@
     $("curToggle").setAttribute("aria-pressed", state.cur);
     route();
   }
+  function parseHash() {
+    var h = location.hash, m = h.match(detailRe), mc = h.match(checkRe), md = h.match(dayRe);
+    var view = m ? "detail" : mc ? "check" : (h === "#/last" && state.score) ? "last" : h === "#/mine" ? "mine" :
+      (md || h === "#/games") ? "games" : "home";
+    return { h: h, view: view, m: m, mc: mc, md: md };
+  }
+  // Scroll position is remembered for the screens people come back to.
+  var ys = {}, shownKey = "";
+  var VIEW_EL = { games: "listView", home: "homeView", check: "checkView", mine: "mineView", detail: "detailView", last: "lastView" };
+  function keepKey(view, day) { return view === "games" ? "games:" + day : (view === "home" || view === "mine") ? view : ""; }
   function route() {
-    var h = location.hash, m = h.match(detailRe), md = h.match(dayRe);
-    var onLast = h === "#/last" && !!state.score;
-    var target = m ? (m[3] || state.slateDate) : md ? md[1] : state.slateDate;
-    var reset = !m && !onLast && !!state.data && target !== state.day;
+    if (state.data) pruneMine();
+    var r = parseHash(), view = r.view, m = r.m, mc = r.mc;
+    var target = view === "detail" ? (m[3] || state.slateDate) :
+      view === "check" ? (mc[4] || homeDate()) :
+      view === "games" ? (r.md ? r.md[1] : state.slateDate) :
+      view === "home" ? homeDate() : (state.data ? state.day : homeDate());
+    var reset = (view === "games" || view === "home") && !!state.data && target !== state.day;
 
     function render() {
-      if (reset) lastY = 0;
-      else if (!$("listView").hidden) lastY = window.scrollY;
-      $("nav").hidden = !!m || !state.score;
-      $("navTonight").setAttribute("aria-current", !onLast && !m ? "page" : "false");
-      $("navLast").setAttribute("aria-current", onLast ? "page" : "false");
-      if (m) {
-        $("listView").hidden = true;
-        $("lastView").hidden = true;
-        $("detailView").hidden = false;
-        showDetail(+m[1], m[2]);
-        window.scrollTo(0, 0);
-      } else if (onLast) {
-        $("listView").hidden = true;
-        $("detailView").hidden = true;
-        $("lastView").hidden = false;
-        renderLast();
-        window.scrollTo(0, 0);
-      } else {
-        $("detailView").hidden = true;
-        $("lastView").hidden = true;
-        $("listView").hidden = false;
-        renderList();
-        window.scrollTo(0, lastY);
-      }
+      var key = keepKey(view, state.day);
+      if (shownKey) ys[shownKey] = window.scrollY;
+      if (reset && key) ys[key] = 0;
+      if (view === "home") state.back = "#/";
+      else if (view === "games" || view === "mine" || view === "last") state.back = r.h;
+      state.shown = view;
+      $("nav").hidden = view === "detail" || view === "check";
+      $("navLast").hidden = !state.score;
+      $("navHome").setAttribute("aria-current", view === "home" ? "page" : "false");
+      $("navTonight").setAttribute("aria-current", view === "games" ? "page" : "false");
+      $("navLast").setAttribute("aria-current", view === "last" ? "page" : "false");
+      $("navMine").setAttribute("aria-current", view === "mine" ? "page" : "false");
+      Object.keys(VIEW_EL).forEach(function (k) { $(VIEW_EL[k]).hidden = k !== view; });
+      if (view === "detail") showDetail(+m[1], m[2]);
+      else if (view === "check") renderCheck(mc);
+      else if (view === "last") renderLast();
+      else if (view === "mine") renderMine();
+      else if (view === "home") renderHome();
+      else renderList();
+      window.scrollTo(0, key ? (ys[key] || 0) : 0);
+      shownKey = key;
     }
-    if (state.data && (onLast || target === state.day)) render();
+    if (state.data && target === state.day) render();
     else selectDay(target).then(render);
   }
   function rerender() {
-    var m = location.hash.match(detailRe);
-    if (!$("detailView").hidden && m) showDetail(+m[1], m[2]);
-    else if (!$("listView").hidden) renderList();
+    var r = parseHash();
+    if (r.view === "home" && homeDate() !== state.day) { route(); return; }
+    if (r.view === "detail" && !$("detailView").hidden) showDetail(+r.m[1], r.m[2]);
+    else if (r.view === "games" && !$("listView").hidden) renderList();
+    else if (r.view === "home") renderHome();
+    else if (r.view === "check" && r.mc) renderCheck(r.mc);
+    else if (r.view === "mine") renderMine();
   }
   // Quietly pull fresh injuries and results while the page is open.
   function refresh() {
     if (document.hidden || !state.data) return;
-    Promise.all([loadInjuries(), loadResults(), loadPreview()]).then(function () {
+    Promise.all([loadInjuries(), loadResults(), loadPreview(), loadLines()]).then(function () {
       var onPreview = previewOK() && state.day === state.preview.meta.slate_date;
       if (!onPreview && state.data !== state.slate) { renderSub(); return; }
       var a = document.activeElement;
@@ -925,6 +1575,16 @@
       state.game = b.dataset.game; renderTabs(); renderList();
     });
     $("search").addEventListener("input", function (e) { state.q = e.target.value; renderList(); });
+    state.view = load("view") === "list" ? "list" : "cards";
+    renderView();
+    $("viewSeg").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-view]");
+      if (!b || b.dataset.view === state.view) return;
+      state.view = b.dataset.view;
+      store("view", state.view);
+      renderView();
+      renderList();
+    });
     $("showOut").addEventListener("change", function (e) { state.showOut = e.target.checked; renderList(); });
     $("daySelect").addEventListener("change", function (e) { location.hash = dayHash(e.target.value); });
     function step(n) {
@@ -933,6 +1593,11 @@
     }
     $("dayPrev").addEventListener("click", function () { step(-1); });
     $("dayNext").addEventListener("click", function () { step(1); });
+    loadMine();
+    updateNav();
+    wireHome();
+    wireCheck();
+    wireMine();
     window.addEventListener("hashchange", route);
     setInterval(refresh, 5 * 60 * 1000);
     document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
@@ -970,13 +1635,19 @@
       .catch(function () { state.score = null; });
   }
 
+  function loadLines() {
+    return loadJSON("props.json")
+      .then(function (j) { state.pp = j && j.meta && j.lines && j.meta.slate_date ? j : null; })
+      .catch(function () { state.pp = null; });
+  }
+
   fetch("slate.json", { cache: "no-cache" })
     .then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     })
     .then(function (data) {
-      return Promise.all([loadInjuries(), loadScore(), loadDays(), loadResults(), loadPreview()]).then(function () { start(data); });
+      return Promise.all([loadInjuries(), loadScore(), loadDays(), loadResults(), loadPreview(), loadLines()]).then(function () { start(data); });
     })
     .catch(function () {
       fail("Couldn't load <code>slate.json</code>. Run <code>python build_slate.py</code> first. " +
