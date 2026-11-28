@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>NBA Projections</title>
+<meta name="description" content="Projected points, rebounds and assists for every player tonight. Type in a number to see how likely it is.">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NBA Projections">
+<meta property="og:title" content="NBA Projections">
+<meta property="og:description" content="Projected points, rebounds and assists for every player tonight. Type in a number to see how likely it is.">
+<meta property="og:url" content="https://acostaluis23.github.io/nba-picks/">
+<meta property="og:image" content="https://acostaluis23.github.io/nba-picks/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="NBA Projections: check a number before tip-off">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NBA Projections">
+<meta name="twitter:description" content="Projected points, rebounds and assists for every player tonight. Type in a number to see how likely it is.">
+<meta name="twitter:image" content="https://acostaluis23.github.io/nba-picks/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=20261128015008">
+</head>
+<body>
+
+<div class="loader" id="loader" aria-live="polite">
+  <div class="lboard" aria-hidden="true">
+    <div class="lrowx">
+      <div><span class="lt">AWAY</span><b>00</b></div>
+      <div class="lshot"><span class="lt">SHOT</span><b id="loaderClock">24</b></div>
+      <div><span class="lt">HOME</span><b>00</b></div>
+    </div>
+    <div class="lsweep"><i></i></div>
+  </div>
+  <p class="lhead">TIP-OFF IN A SEC</p>
+  <p class="lsub">Loading tonight's projections</p>
+</div>
+
+<nav class="nav" id="nav" aria-label="Pages" hidden>
+  <a href="#/" id="navHome"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"/></svg>Home</a>
+  <a href="#/games" id="navTonight"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 4v16"/></svg>Games</a>
+  <a href="#/last" id="navLast"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V11M12 20V5M19 20v-6"/></svg>Last night</a>
+  <a href="#/mine" id="navMine"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>My numbers</a>
+</nav>
+
+<main id="homeView" class="narrow" hidden></main>
+<main id="checkView" class="narrow" hidden></main>
+<main id="mineView" class="narrow" hidden></main>
+
+<main id="listView" class="wrap" hidden>
+  <div class="top">
+    <div class="title-row">
+      <div>
+        <h1 class="title" id="dayTitle">Tonight</h1>
+        <p class="sub" id="subline">Loading...</p>
+      </div>
+    </div>
+
+    <div class="daynav" id="dayNav" hidden>
+      <button type="button" class="daybtn" id="dayPrev" aria-label="Previous day">&#8249;</button>
+      <select id="daySelect" aria-label="Pick a day"></select>
+      <button type="button" class="daybtn" id="dayNext" aria-label="Next day">&#8250;</button>
+    </div>
+    <p class="warn previewnote" id="previewNote" hidden></p>
+
+    <div class="toggle-card">
+      <div>
+        <div class="t1">Ignore last season</div>
+        <div class="t2">Project from this season's games only</div>
+      </div>
+      <button type="button" class="switch" id="curToggle" aria-pressed="false" aria-label="Ignore last season">
+        <span class="track"><span class="knob"></span></span>
+      </button>
+    </div>
+
+    <div class="searchrow">
+      <input class="search" id="search" type="search" placeholder="Search a player" aria-label="Search a player" autocomplete="off">
+      <div class="seg" id="viewSeg" role="group" aria-label="View">
+        <button type="button" data-view="cards" aria-pressed="true">Cards</button>
+        <button type="button" data-view="list" aria-pressed="false">List</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="scroller" id="statChips" role="group" aria-label="Stat"></div>
+  <div class="tabs" id="gameTabs" role="group" aria-label="Game"></div>
+
+  <label class="check" id="outRow" hidden><input type="checkbox" id="showOut"> Show players listed out</label>
+  <div id="listNote" class="note" style="padding-top:12px" hidden></div>
+  <p class="lkey" id="listKey" hidden>
+    <span><i class="k-band"></i>Typical range</span>
+    <span><i class="k-tick"></i>Our projection</span>
+    <span><i class="k-dot"></i>Where they finished</span>
+  </p>
+  <div class="grid" id="cards"></div>
+  <div id="listMsg"></div>
+
+  <p class="note footer">Projections are estimates from box-score history, not betting advice. Injury status comes from ESPN and can change before tip-off, so confirm who is playing.</p>
+</main>
+
+<main id="detailView" class="narrow" hidden></main>
+<main id="lastView" class="narrow" hidden></main>
+
+<script src="app.js?v=20261128015008"></script>
+</body>
+</html>
